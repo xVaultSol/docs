@@ -1,0 +1,36 @@
+---
+title: xStocks and routing
+description: How xVault uses xStocks data, Backed xChange RFQs, and Jupiter fallback paths.
+---
+
+xVault integrates with xStocks for asset metadata, multipliers, system status, proof of reserves, and RFQ-based trading. Jupiter is the fallback execution path when xChange is unavailable or when trading-hours rules require it.
+
+## Public endpoints xVault depends on
+
+- `/public/assets`
+- `/public/assets/{symbol}`
+- `/public/assets/{symbol}/price-data`
+- `/public/assets/{symbol}/multiplier?network=Solana`
+- `/public/system/status/{symbol}`
+- `/public/corporate-actions/upcoming`
+- `/public/proof-of-reserves/{symbol}`
+- `/v2/oracles` and `/v2/oracles/{symbol}`
+
+## Trading-hours rule
+
+For assets marked `MarketHours`, the keeper must not use xChange outside market hours. The correct behavior is:
+
+- use xChange during supported market hours,
+- fall back to Jupiter if atomic trading is unavailable,
+- skip the leg if the asset is halted and no safe route exists.
+
+## Solana-specific RFQ notes
+
+- Solana xChange returns a base64-encoded partially-signed `VersionedTransaction`.
+- The quote lifetime is tied to blockhash validity rather than a fixed timestamp.
+- Receiving wallets must have the required ATAs before submission.
+- xVault prepends a validation instruction before submission to confirm the quote matches the expected raw asset flow.
+
+## Multiplier handling
+
+Multipliers are polled off-chain and fed into NAV snapshots. Transfers remain raw even when the displayed balance changes.

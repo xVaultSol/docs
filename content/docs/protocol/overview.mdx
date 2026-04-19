@@ -1,0 +1,46 @@
+---
+title: Protocol overview
+description: What xVault is, who it serves, and the operating model behind tokenized equity vaults.
+---
+
+xVault packages baskets of tokenized equities into Solana vaults with a predictable operating model: deposit into a curated basket, mint vault shares, let the keeper manage drift, and distribute protocol rewards to VLT stakers in real xStock kind.
+
+## Scope
+
+- Chain: Solana
+- Asset standard: Token-2022
+- Underlying assets: xStocks with Scaled UI multipliers
+- Rebalance routes: Backed xChange first, Jupiter fallback when xChange is unavailable or out of hours
+- Rewards: VLT staking with xStock-kind distribution
+
+## Primary user flows
+
+### Deposit
+
+Users deposit into a vault and receive proportional share tokens. Deposit math depends on fresh oracle-backed NAV and must respect raw-onchain accounting.
+
+### Withdraw
+
+Users can either withdraw a pro-rata in-kind basket or exit through a USDC route bounded by user-controlled slippage.
+
+### Rebalance
+
+The keeper computes weight drift, fetches multipliers and prices, requests xChange quotes during market hours, and falls back to Jupiter or skip logic when required.
+
+### Stake and claim
+
+VLT holders stake into the rewards system and claim epochal xStock distributions funded from protocol economics.
+
+## Non-negotiable math rule
+
+All xStock balances on Solana use Token-2022 Scaled UI. That means:
+
+```text
+display_balance = raw_onchain_balance × current_multiplier
+```
+
+Programs and transfer instructions must store and move raw amounts. NAV is the place where raw values are scaled.
+
+## Compliance boundary
+
+xStocks are not available to US persons or residents of restricted jurisdictions. The frontend and docs must not present US-targeted marketing or onboarding copy.

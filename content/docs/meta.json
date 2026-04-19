@@ -1,0 +1,11 @@
+{
+  "title": "xVault Docs",
+  "pages": [
+    "index",
+    "protocol",
+    "integrations",
+    "operations",
+    "security",
+    "onchain"
+  ]
+}

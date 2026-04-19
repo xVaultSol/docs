@@ -1,0 +1,37 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+:root {
+  --background: #f4f0e8;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-ibm-plex-mono);
+}
+
+html {
+  scrollbar-gutter: stable;
+  color-scheme: light;
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(13, 148, 136, 0.12), transparent 30%),
+    linear-gradient(180deg, #fbf8f3 0%, #f4f0e8 100%);
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), sans-serif;
+}
+
+a {
+  text-underline-offset: 0.2em;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}

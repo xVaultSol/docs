@@ -1,0 +1,32 @@
+---
+title: xVault documentation
+description: Protocol, operations, integrations, and on-chain references for the xVault stack.
+---
+
+xVault is a Solana protocol for tokenized equity vaults built on Token-2022 xStocks, keeper-driven rebalancing, and VLT-denominated reward distribution.
+
+The documentation in this app is organized for operators, frontend contributors, and integrators who need the protocol model without digging through implementation details first.
+
+## Start here
+
+<Cards>
+  <Card title="Protocol overview" href="/docs/protocol/overview" />
+  <Card title="Architecture" href="/docs/protocol/architecture" />
+  <Card title="xStocks and routing" href="/docs/integrations/xstocks-and-routing" />
+  <Card title="Program IDs" href="/docs/onchain/program-ids" />
+</Cards>
+
+## Core ideas
+
+- Vault holdings are valued using raw amount × multiplier × price.
+- Market-hours assets route through Backed xChange during supported windows and through Jupiter or skip paths outside those windows.
+- The keeper is responsible for NAV freshness, rebalance execution, and corporate-action response.
+- xStocks are not available to US persons or restricted jurisdictions.
+
+## Documentation map
+
+- `Protocol` covers the product surface, vault lineup, and architecture.
+- `Integrations` documents xStocks data, xChange routing, and Jupiter fallback rules.
+- `Operations` focuses on keeper cadence and oracle behavior.
+- `Security` captures invariants and pause conditions.
+- `On-chain` lists the program IDs currently declared in source and their deployment status.

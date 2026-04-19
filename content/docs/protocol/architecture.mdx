@@ -1,0 +1,31 @@
+---
+title: Architecture
+description: How the web app, SDK, keeper, indexer, and Anchor programs fit together.
+---
+
+xVault is split across three main layers: the user-facing web app, off-chain services, and on-chain Anchor programs.
+
+## Components
+
+| Layer | Responsibility |
+| --- | --- |
+| `apps/web` | User-facing dapp, wallet flows, geofence and terms gating |
+| `apps/docs` | Public and operator-facing documentation |
+| `packages/sdk` | Typed client bindings for the Anchor programs |
+| `packages/xstocks-client` | Typed wrapper around xStocks public and authenticated APIs |
+| `services/keeper` | NAV pushes, drift scanning, rebalance execution, corporate-action response |
+| `services/indexer` | Event ingestion and analytics persistence |
+| `programs/vault` | Vault deposits, withdrawals, rebalances, fee logic, pause controls |
+| `programs/oracle` | Keeper-pushed NAV snapshots with multiplier-aware entries |
+| `programs/rewards` | VLT staking and epoch reward claims |
+
+## Data path
+
+1. The web app reads vault state and oracle data through the SDK.
+2. The keeper fetches xStocks multipliers and prices, computes NAV, and writes snapshots on-chain.
+3. Rebalance jobs request xChange quotes, prepend validation instructions, and co-sign transactions before submission.
+4. The indexer consumes program events and powers historical analytics.
+
+## Why xVault uses an oracle program
+
+Scaled UI multipliers can shift independently of raw balances, especially during dividends, splits, or fee accrual. The oracle program makes multiplier-aware NAV snapshots explicit, fresh, and auditable for deposit and withdrawal paths.

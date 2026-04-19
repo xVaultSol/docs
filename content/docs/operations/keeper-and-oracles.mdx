@@ -1,0 +1,35 @@
+---
+title: Keeper and oracle operations
+description: Job cadence, stale data limits, quote handling, and automated pause behavior.
+---
+
+The keeper is the operational core of xVault. It maintains fresh oracle data, scans for drift, executes rebalances, watches corporate actions, and prepares reward distribution epochs.
+
+## Core jobs
+
+| Job | Purpose | Cadence |
+| --- | --- | --- |
+| `nav-push` | Fetch prices and multipliers, then write oracle snapshots | Every 15s in market hours, 60s off-hours |
+| `drift-scan` | Compare current weights against target weights | Every 60s |
+| `rebalance-exec` | Request xChange RFQs, validate, co-sign, and submit | Triggered by drift |
+| `corp-action-watcher` | Detect upcoming actions that require pausing | Hourly |
+| `epoch-distributor` | Publish weekly reward distribution roots | Weekly |
+
+## Freshness and fallback
+
+- Market-hours NAV should remain fresh within roughly 60 seconds.
+- Off-hours tolerances can be looser, but stale NAV should still block NAV-sensitive actions.
+- xStocks `/v2/oracles` is the primary price source.
+- `/public/assets/{symbol}/price-data` is only a fallback indicative quote.
+
+## Corporate-action response
+
+Automatic pause behavior is required for:
+
+- spin-offs,
+- merger events,
+- redemption,
+- worthless removal,
+- rights distribution.
+
+These are operationally sensitive and should not be handled as silent background changes.

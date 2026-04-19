@@ -1,0 +1,26 @@
+---
+title: Vault lineup
+description: The initial vault SKUs and how their strategies differ.
+---
+
+The first xVault release is built around a small set of curated, governance-defined baskets rather than user-generated vaults.
+
+## Planned SKUs
+
+| Vault | Ticker | Composition | Weighting | Rebalance trigger |
+| --- | --- | --- | --- | --- |
+| Mag 7 | `vMAG7` | AAPLx, MSFTx, NVDAx, GOOGLx, AMZNx, METAx, TSLAx | Equal-weight | 3% drift or 7 days |
+| Semis | `vCHIP` | NVDAx, AMDx, TSMx, AVGOx, INTCx | Market-cap | 3% drift or 7 days |
+| Dividend | `vDIV` | KOx, JNJx, PGx, XOMx | Equal-weight | 5% drift or 30 days |
+| SPY-Lite | `vSPY` | SPYx plus USDC buffer | Fixed 95/5 | 2% drift |
+
+## Why curated vaults
+
+- Weight definitions stay auditable.
+- Corporate-action response stays operationally manageable.
+- Keeper policies can be tailored per vault basket.
+- Governance retains control over index quality and replacement logic.
+
+## Pause conditions
+
+Certain corporate actions require vault intervention rather than automatic continuation. Spin-offs, merger variants, redemption events, worthless removals, and rights distributions should pause affected vaults until multisig review is complete.
