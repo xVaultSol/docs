@@ -7,17 +7,18 @@ The canonical source for instruction layouts is the IDL, consumed via `packages/
 
 ## `xvault_vault`
 
-| Instruction                            | Authority      | Effect                                                                                     |
-| -------------------------------------- | -------------- | ------------------------------------------------------------------------------------------ |
-| `init_vault(args)`                     | Admin multisig | One-shot: configures SKU, holdings, fee params, keeper and admin authorities.              |
-| `deposit(usdc_amount, min_shares_out)` | User           | Transfers USDC in, reads NAV from `oracle`, mints shares pro-rata.                         |
-| `withdraw_in_kind(shares)`             | User           | Burns shares; returns raw pro-rata xStock amounts. No fee.                                 |
-| `withdraw_usdc(shares, max_slip_bps)`  | User           | Burns shares; pays USDC from the cash buffer. 0.05% fee.                                   |
-| `rebalance_leg(args)`                  | Keeper         | Validates and books the post-trade deltas of an xChange / Jupiter fill; enforces slippage. |
-| `collect_mgmt_fee()`                   | Permissionless | Mints streamed 0.2%/yr management fee to treasury.                                         |
-| `collect_perf_fee()`                   | Permissionless | HWM-based performance-fee collection.                                                      |
-| `set_paused(paused)`                   | Admin multisig | Emergency circuit breaker; disables deposit and rebalance, leaves in-kind withdrawals.     |
-| `update_weights(new_weights[])`        | Admin multisig | Updates target weights. Subject to 48 h timelock.                                          |
+| Instruction                            | Authority      | Effect                                                                                                                     |
+| -------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `init_vault(args)`                     | Admin multisig | One-shot: configures SKU, holdings, fee params, keeper and admin authorities.                                              |
+| `deposit(usdc_amount, min_shares_out)` | User           | Transfers USDC in, reads NAV from `oracle`, mints shares pro-rata.                                                         |
+| `withdraw_in_kind(shares)`             | User           | Burns shares; returns raw pro-rata xStock amounts. No fee.                                                                 |
+| `withdraw_usdc(shares, max_slip_bps)`  | User           | Burns shares; pays USDC from the cash buffer. 0.05% fee.                                                                   |
+| `rebalance_leg(args)`                  | Keeper         | Validates and books the post-trade deltas of an xChange / Jupiter fill; enforces slippage.                                 |
+| `collect_mgmt_fee()`                   | Permissionless | Mints streamed 0.2%/yr management fee to treasury.                                                                         |
+| `collect_perf_fee()`                   | Permissionless | HWM-based performance-fee collection.                                                                                      |
+| `set_paused(paused)`                   | Admin multisig | Legacy full-stop: sets the `halted` flag. Blocks deposits, rebalance, fee collection; leaves `withdraw_in_kind` open.      |
+| `set_pause_flags(flags)`               | Admin multisig | Granular control: overwrites the full `PauseFlags` set (`deposits_paused`, `rebalance_paused`, `oracle_frozen`, `halted`). |
+| `update_weights(new_weights[])`        | Admin multisig | Updates target weights. Subject to 48 h timelock.                                                                          |
 
 ## `xvault_oracle`
 

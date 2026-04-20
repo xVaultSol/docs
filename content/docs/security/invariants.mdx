@@ -18,7 +18,7 @@ Every balance-moving ix in xVault re-verifies a small set of invariants before e
 - **Multiplier match:** `multiplier_on_chain == expected_multiplier` before any transfer.
 - **NAV freshness:** `now - oracle.updated_at ≤ MAX_STALE_SECS` for NAV-sensitive ix (60 s market hours, 300 s off-hours).
 - **Halt gate:** for every asset in a vault, `isAtomicTradingHalted == false` **or** the vault is paused.
-- **Corp-action gate:** a pending corporate action of type `SpinOff | *Merger | Redemption | WorthlessRemoval | RightsDistribution` within 48 h of activation implies the vault is auto-paused.
+- **Corp-action gate:** a pending corporate action of type `SpinOff | *Merger | Redemption | WorthlessRemoval | RightsDistribution` within 48 h of activation implies the vault is auto-paused. The gate follows the xStocks `status` lifecycle — `Cancelled`, `Dismissed`, and dropped events auto-clear the pause.
 
 ## Threat model
 
@@ -48,11 +48,11 @@ Each program declares its own `ErrorCode` enum. Representative entries from `pro
 
 ## Authority boundaries
 
-| Actor                   | Allowed ix                                                                          |
-| ----------------------- | ----------------------------------------------------------------------------------- |
-| User                    | `deposit`, `withdraw_in_kind`, `withdraw_usdc`, `stake`, `claim`                    |
-| Keeper (authorized set) | `rebalance_leg`, `distribute_epoch`, NAV snapshot updates                           |
-| Admin multisig (3-of-5) | `init_vault`, `set_paused`, `update_weights`, `update_keeper_set`, program upgrades |
+| Actor                   | Allowed ix                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| User                    | `deposit`, `withdraw_in_kind`, `withdraw_usdc`, `stake`, `claim`                                       |
+| Keeper (authorized set) | `rebalance_leg`, `distribute_epoch`, NAV snapshot updates                                              |
+| Admin multisig (3-of-5) | `init_vault`, `set_paused`, `set_pause_flags`, `update_weights`, `update_keeper_set`, program upgrades |
 
 - **Timelock:** 48 h on weight changes, fee changes, keeper set changes, and program upgrades.
 - **Pause:** multisig-authorized; no timelock so emergency halts are fast.

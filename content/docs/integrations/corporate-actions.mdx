@@ -32,13 +32,29 @@ Backed applies cash and stock dividends as a multiplier increase on the underlyi
 
 ## Pause semantics
 
-A paused vault:
+xVault uses a granular `PauseFlags` struct rather than a single on/off switch. Each flag gates a distinct class of instruction, so narrow events (e.g. a 30-minute multiplier activation window) do not force a full deposit / withdraw outage.
 
-- **Blocks** `deposit`, `rebalance_leg`, `collect_mgmt_fee`, `collect_perf_fee`.
-- **Permits** `withdraw_in_kind` so users are never trapped.
-- **Permits** USDC withdrawals only if the cash buffer has enough liquidity; otherwise the withdrawal reverts with `VaultPaused` and the user is directed to the in-kind path.
+| Flag               | Blocks                                            | Typical trigger                                                 |
+| ------------------ | ------------------------------------------------- | --------------------------------------------------------------- |
+| `deposits_paused`  | `deposit`, `collect_mgmt_fee`, `collect_perf_fee` | Pending corp-action within 48 h                                 |
+| `rebalance_paused` | `rebalance_leg`                                   | Asset halt, corp-action window, forced exit in progress         |
+| `oracle_frozen`    | `deposit`, `withdraw_usdc`, fee collection        | Multiplier activation window (\u00b115 min per Backed guidance) |
+| `halted`           | All of the above                                  | Manual emergency stop                                           |
 
-Unpausing is a multisig ix with no timelock (timelocks are for routine parameter changes, not emergency recovery).
+`withdraw_in_kind` remains open under every flag combination \u2014 users are never trapped.
+
+Admins set flags with `set_pause_flags(PauseFlags)`. The legacy `set_paused(bool)` ix maps to `halted` for backward compatibility.
+
+## Watcher is a reconciler, not a one-shot trigger
+
+xStocks corp-actions are mutable: they carry a `status` field (`Initial`, `Corrected`, `Scheduled`, `Cancelled`, `Suggested`, `Dismissed`) and a `version` counter. Fields like `effectiveTimeUtc` and `multiplierNew` can be amended post-publication. The keeper's `corp-action-watch` job is a reducer keyed on `(eventId, version)`:
+
+- **Apply pause** when a severe action is `Initial | Corrected | Scheduled` and within the 48 h window.
+- **Re-apply** on `version` bump (`Corrected`) so amended effective times are respected.
+- **Clear pause** on `Cancelled`, `Dismissed`, or when the event drops from `/upcoming` (meaning `effectiveTime` has passed and post-action cleanup has run).
+- **Ignore** `Suggested` \u2014 that status is advisory only.
+
+State is persisted in Redis so intents are idempotent across keeper restarts and leader failover. See [`services/keeper/src/corp-actions.ts`](https://github.com/xvault-protocol/xvault/blob/main/services/keeper/src/corp-actions.ts) for the reducer and its unit tests.
 
 ## Multiplier mismatch guard
 
@@ -57,9 +73,10 @@ This is defense-in-depth against mid-flight multiplier updates. If the keeper ha
 
 `corp-action-watch` runs hourly and:
 
-1. Fetches `GET /public/corporate-actions/upcoming`.
-2. For each node, resolves affected SKUs.
-3. For severe types (`SpinOff`, `*Merger`, `Redemption`, `WorthlessRemoval`, `RightsDistribution`) issues a **pause alert** to the multisig signers and, when within 48h of activation, submits `set_paused(true)` against those SKUs.
-4. Surfaces upcoming actions on the dapp banner so users see them before they deposit.
+1. Fetches `GET /public/corporate-actions/upcoming` and filters to SKU-member symbols.
+2. Loads the prior `(eventId, version, paused)` map from Redis.
+3. Calls `reconcileCorpActions(actions, prior)` \u2014 a pure reducer that emits `apply` / `clear` intents only when the required on-chain state differs from prior state.
+4. For each intent, logs a structured record for the multisig signers and (once SDK builders land) submits `set_pause_flags` against the affected SKUs.
+5. Surfaces upcoming actions on the dapp banner so users see them before they deposit.
 
 See [Operations → Keeper and oracles](/docs/operations/keeper-and-oracles) for how this job interacts with the rebalancer.

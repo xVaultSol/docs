@@ -39,7 +39,7 @@ The keeper runs `drift-scan` every 60 seconds, enqueues a rebalance job when a t
 
 ## Pause policy
 
-Certain corporate actions require vault intervention rather than automatic continuation. The keeper watches `/public/corporate-actions/upcoming` hourly and auto-pauses affected vaults for these event types:
+Certain corporate actions require vault intervention rather than automatic continuation. The keeper watches `/public/corporate-actions/upcoming` hourly and runs a `(eventId, version, status)` reconciler. For severe types within 48 h of activation it sets `pause_flags.deposits_paused = true` and `rebalance_paused = true`. When the xStocks feed marks the action `Cancelled` / `Dismissed`, or the event drops from `/upcoming`, the reconciler clears the pause.
 
 | `caType`             | Effect                                                                  |
 | -------------------- | ----------------------------------------------------------------------- |
@@ -47,11 +47,11 @@ Certain corporate actions require vault intervention rather than automatic conti
 | `CashMerger`         | Pause; likely force-exit the leg and rebalance into the remainder.      |
 | `StockMerger`        | Pause; may require basket reconfiguration.                              |
 | `StockAndCashMerger` | Pause; hybrid — requires manual reconciliation.                         |
-| `Redemption`         | Pause; force-exit the affected leg.                                     |
+| `Redemption`         | Pause; force-exit via `redemptionPriceUsd`.                             |
 | `WorthlessRemoval`   | Pause; remove the leg and redistribute weight.                          |
 | `RightsDistribution` | Pause; rights are typically handled off-chain.                          |
 
-Paused vaults reject deposits and rebalances but still permit in-kind withdrawals so users are never trapped. See [Integrations → Corporate actions](/docs/integrations/corporate-actions) for the full mapping.
+Paused vaults reject deposits, rebalances, and fee collection but always permit `withdraw_in_kind` so users are never trapped. See [Integrations → Corporate actions](/docs/integrations/corporate-actions) for the `PauseFlags` breakdown and the reconciler contract.
 
 ## Why curated (for now)
 
