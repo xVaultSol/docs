@@ -10,6 +10,7 @@ export function baseOptions(): BaseLayoutProps {
     themeSwitch: {
       enabled: false,
     },
+    githubUrl: 'https://github.com/xVaultSol/docs',
     links: [
       {
         text: 'Docs',

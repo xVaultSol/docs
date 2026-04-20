@@ -12,7 +12,7 @@ export default function HomePage() {
             </p>
             <div className="mt-6 space-y-4">
               <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.04em] text-zinc-950 md:text-7xl">
-                Tokenized equity vaults on Solana, documented for operators and integrators.
+                Tokenized equity vaults on Solana.
               </h1>
               <p className="max-w-2xl text-base leading-7 text-zinc-700 md:text-lg">
                 xVault combines Token-2022 xStocks, keeper-driven rebalancing, oracle-backed NAV,
@@ -47,49 +47,11 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="mt-8 grid gap-3 text-sm">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="font-medium text-white">Deployment status</p>
-                <p className="mt-2 text-zinc-300">
-                  Current source-level program IDs are documented, but the production deployment set
-                  is not yet deployed until further notice.
-                </p>
-              </div>
-            </div>
+           
           </div>
         </div>
 
-        <div className="grid gap-6 bg-white/55 p-8 backdrop-blur md:grid-cols-[1.1fr_0.9fr] md:p-10">
-          <div>
-            <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">OPERATING MODEL</p>
-            <p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-800">
-              One vault share abstracts a basket of xStocks, but the mechanics stay inspectable:
-              deposits enter via USDC, the keeper enforces rule-based rebalances, and exits can
-              settle in-kind or route back to USDC with slippage controls.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-1">
-            <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
-              <p className="text-xs font-semibold tracking-[0.18em] text-teal-700">RAW MATH</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-700">
-                Transfers stay raw. NAV uses raw amount × multiplier × price.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
-              <p className="text-xs font-semibold tracking-[0.18em] text-teal-700">ROUTING</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-700">
-                Market-hours assets route through xChange first, with guarded fallbacks.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
-              <p className="text-xs font-semibold tracking-[0.18em] text-teal-700">REWARDS</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-700">
-                VLT utility sits on top of the vault layer instead of replacing it.
-              </p>
-            </div>
-          </div>
-        </div>
+        
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
