@@ -15,7 +15,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://docs.xvault.fi'),
+  metadataBase: new URL('https://docs.xvaultsol.com'),
   title: {
     default: 'xVault Docs',
     template: '%s | xVault Docs',
