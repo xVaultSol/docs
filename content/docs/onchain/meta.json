@@ -1,4 +1,4 @@
 {
-  "title": "On-chain",
-  "pages": ["program-ids"]
+  "title": "Reference",
+  "pages": ["program-ids", "instructions"]
 }

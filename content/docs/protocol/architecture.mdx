@@ -1,31 +1,172 @@
 ---
 title: Architecture
-description: How the web app, SDK, keeper, indexer, and Anchor programs fit together.
+description: How the dapp, SDK, keeper, indexer, and Anchor programs fit together.
 ---
 
-xVault is split across three main layers: the user-facing web app, off-chain services, and on-chain Anchor programs.
+xVault splits into three layers: a **user-facing dapp**, a set of **off-chain services** (keeper + indexer), and **three Anchor programs** on Solana.
+
+## Component map
+
+```
+                  ┌──────────────┐
+                  │   Next.js    │
+                  │   dapp       │
+                  └──────┬───────┘
+                         │ SDK
+             ┌───────────┴────────────┐
+             │                        │
+             ▼                        ▼
+     ┌───────────────┐        ┌───────────────┐
+     │  Anchor       │        │  xStocks API  │
+     │  programs     │        │  (Backed)     │
+     │  vault /      │        └───────┬───────┘
+     │  oracle /     │                │
+     │  rewards      │        ┌───────┴───────┐
+     └───────┬───────┘        │   Jupiter     │
+             │                └───────┬───────┘
+             │                        │
+             ▼                        ▼
+       ┌───────────────────────────────────┐
+       │  Keeper service                   │
+       │  — NAV push · drift scan · RFQ    │
+       │    exec · corp-action watch ·     │
+       │    epoch distribution             │
+       └────────────┬──────────────────────┘
+                    │ events
+                    ▼
+             ┌───────────────┐
+             │   Indexer     │
+             │  (Postgres)   │
+             └───────────────┘
+```
 
 ## Components
 
-| Layer | Responsibility |
-| --- | --- |
-| `apps/web` | User-facing dapp, wallet flows, geofence and terms gating |
-| `apps/docs` | Public and operator-facing documentation |
-| `packages/sdk` | Typed client bindings for the Anchor programs |
-| `packages/xstocks-client` | Typed wrapper around xStocks public and authenticated APIs |
-| `services/keeper` | NAV pushes, drift scanning, rebalance execution, corporate-action response |
-| `services/indexer` | Event ingestion and analytics persistence |
-| `programs/vault` | Vault deposits, withdrawals, rebalances, fee logic, pause controls |
-| `programs/oracle` | Keeper-pushed NAV snapshots with multiplier-aware entries |
-| `programs/rewards` | VLT staking and epoch reward claims |
+| Layer                     | Responsibility                                                     |
+| ------------------------- | ------------------------------------------------------------------ |
+| `apps/web`                | Dapp, wallet flows, geofence and terms gating                      |
+| `apps/docs`               | Public and operator-facing documentation                           |
+| `packages/sdk`            | Typed client bindings generated from the Anchor IDLs               |
+| `packages/xstocks-client` | Typed wrapper around the xStocks public and authenticated APIs     |
+| `services/keeper`         | NAV pushes, drift scans, rebalance execution, corp-action response |
+| `services/indexer`        | Helius-webhook-driven event indexer writing to Postgres            |
+| `programs/vault`          | Deposits, withdrawals, rebalance bookkeeping, fees, pause controls |
+| `programs/oracle`         | Keeper-pushed NAV snapshots with multiplier-aware entries          |
+| `programs/rewards`        | `$VLT` staking and epoch reward claims                             |
 
-## Data path
+## On-chain programs
 
-1. The web app reads vault state and oracle data through the SDK.
-2. The keeper fetches xStocks multipliers and prices, computes NAV, and writes snapshots on-chain.
-3. Rebalance jobs request xChange quotes, prepend validation instructions, and co-sign transactions before submission.
-4. The indexer consumes program events and powers historical analytics.
+### `vault`
 
-## Why xVault uses an oracle program
+PDAs:
 
-Scaled UI multipliers can shift independently of raw balances, especially during dividends, splits, or fee accrual. The oracle program makes multiplier-aware NAV snapshots explicit, fresh, and auditable for deposit and withdrawal paths.
+- `vault_state` seeds `["vault", sku_id]` — target weights, last NAV, fee config
+- `vault_share_mint` seeds `["share", sku_id]` — Token-2022 mint, vault PDA is authority
+- `holding_ata(asset)` seeds `["holding", sku_id, mint]` — vault's ATA per asset
+
+Instructions:
+
+| Ix                                    | Authority      | Notes                                                                      |
+| ------------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| `init_vault(args)`                    | admin multisig | One-shot config for SKU, holdings, fee params, keeper + admin authorities. |
+| `deposit(raw_amount, min_shares_out)` | user           | Deposits USDC, mints shares from oracle NAV.                               |
+| `withdraw_in_kind(shares)`            | user           | Burns shares, returns pro-rata raw xStock amounts.                         |
+| `withdraw_usdc(shares, max_slip_bps)` | user           | Burns shares, pays USDC from cash buffer; charges 0.05% fee.               |
+| `rebalance_leg(args)`                 | keeper         | Validates and books rebalance execution against expected raw deltas.       |
+| `collect_mgmt_fee()`                  | permissionless | Streams 0.2%/yr to treasury.                                               |
+| `collect_perf_fee()`                  | permissionless | HWM-based performance fee.                                                 |
+| `set_paused(paused)`                  | admin multisig | Emergency circuit breaker.                                                 |
+| `update_weights(new_weights[])`       | admin multisig | Updates target weights (behind 48h timelock).                              |
+
+**State guards (every ix):**
+
+- `asset.status == Active`
+- `nav_age < MAX_STALE_SECS`
+- `multiplier == expected_multiplier` (re-verified before any transfer)
+- In `rebalance_leg`: sibling-ix introspection confirms incoming/outgoing transfers match the quoted mint and raw amount.
+- Both `Token` and `Token-2022` program IDs are supported per asset, driven by `token_programs[]` at `init_vault`.
+
+### `oracle`
+
+- `nav_snapshot` PDA per SKU with up to 20 entries — `mint`, `price_usd_1e8`, `multiplier_num`, flags, `updated_slot`.
+- **Primary price source:** `GET /v2/oracles/{symbol}` (Backed's onchain oracle feed).
+- **Secondary:** `GET /public/assets/{symbol}/price-data` (indicative `quote` only).
+- **Tertiary:** Pyth equity feed for overlapping tickers.
+- Keeper signs via ed25519; program verifies the signer is in the authorized keeper set.
+- Staleness limits: `MAX_STALE_SECS = 60` (market hours), `300` (off-hours). NAV-sensitive ix revert with `StaleNav` if exceeded.
+
+### `rewards`
+
+- `stake(amount, tier)` — locks `$VLT` for 30/90/180d. Pro-rata weighting, no boost multipliers.
+- `distribute_epoch(epoch_id, merkle_root)` — keeper posts the Merkle root of pro-rata xStock payouts.
+- `claim(proof, amounts[])` — user claims their share per epoch.
+
+## Off-chain services
+
+### Keeper
+
+Stack: Node 22 + TypeScript, Anchor client, Bull queue on Redis, Postgres.
+
+| Job                 | Purpose                                                               | Cadence                            |
+| ------------------- | --------------------------------------------------------------------- | ---------------------------------- |
+| `nav-push`          | Fetch prices + multipliers, write oracle PDA                          | 15 s market hours / 60 s off-hours |
+| `drift-scan`        | Compute per-vault drift, enqueue `rebalance` jobs                     | 60 s                               |
+| `rebalance-exec`    | Request xChange RFQ or Jupiter quote, co-sign, submit                 | Triggered by drift                 |
+| `corp-action-watch` | Poll `/public/corporate-actions/upcoming`, alert on severe events     | Hourly                             |
+| `epoch-distributor` | Sweep Pump.fun fees, build Merkle distribution, post epoch root       | Weekly (Sunday 00:00 UTC)          |
+| `collect-mgmt-fee`  | Permissionless trigger for management fee collection                  | Daily                              |
+| `deposit-router`    | Listen for deposit events, buy basket, validate via `rebalance_leg`   | Event-driven                       |
+| `withdrawal-router` | Listen for USDC withdrawal requests, sell xStocks, refill cash buffer | Event-driven                       |
+
+**HA:** leader election via Redis Redlock; two replicas in separate AZs.
+
+### Indexer
+
+- Subscribes to program logs via **Helius Raw webhooks** (1 credit / event; _not_ Enhanced at 100 credits each).
+- Decodes events locally with the Anchor IDL; writes normalized rows to Postgres (`deposits`, `withdrawals`, `rebalances`, `fees`, `stakes`, `claims`).
+- Powers UI analytics (TVL, APR, fee accruals).
+- One webhook per program (3 total), fits within the Free-tier 5-webhook cap.
+
+## Data flow — a deposit
+
+```
+User              Web           SDK            Program         xStocks API     Keeper
+ │  click deposit  │              │               │                │             │
+ │  (USDC)         │              │               │                │             │
+ │────────────────▶│ getNavQuote()│               │                │             │
+ │                 │─────────────▶│ read oracle   │                │             │
+ │                 │              │──────────────▶│                │             │
+ │                 │◀─────────────┤               │                │             │
+ │  sign tx        │              │               │                │             │
+ │────────────────▶│ deposit()    │               │                │             │
+ │                 │──────────────────────────────▶│               │             │
+ │                 │              │               │ USDC transfer  │             │
+ │                 │              │               │ mint shares    │             │
+ │                 │              │               │ emit event     │             │
+ │                 │              │               │──────────────────────────────▶
+ │                 │              │               │                │             │ reads
+ │                 │              │               │                │             │ deposit
+ │                 │              │               │                │             │ event
+ │                 │              │               │ rebalance_leg ◀────────────────
+ │                 │              │               │ buy basket via xChange/Jupiter
+```
+
+## Infrastructure posture
+
+We target **Helius Developer tier** for v1 mainnet (5/s `sendTransaction`, 50 RPC/s, 10 DAS/s, Enhanced Websockets, 50 webhooks). The keeper enforces credit-budget rules:
+
+- Never loop Enhanced Transactions (use raw `getSignaturesForAddress` + `getTransaction` + IDL decode).
+- Never use `getTransactionsForAddress` for backfills.
+- Batch reads with `getMultipleAccounts` in the keeper.
+
+Frontend DAS calls are SWR-cached with a 60s TTL and in-flight dedupe.
+
+## Authority boundaries
+
+| Actor                          | Can…                                                       | Cannot…                                               |
+| ------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------- |
+| User                           | Deposit, withdraw (USDC or in-kind), stake, claim          | Mutate weights, pause, access keeper authority        |
+| Keeper                         | Push NAV, submit `rebalance_leg`, post epoch Merkle root   | Move user funds, bypass slippage or multiplier guards |
+| Admin multisig (3/5 Squads v4) | Pause, update weights, rotate keeper set, upgrade programs | Mint `$VLT`, skip the 48h timelock on param changes   |
+
+See [Security → Invariants](/docs/security/invariants) for the complete on-chain invariant list.

@@ -2,10 +2,16 @@
   "title": "xVault Docs",
   "pages": [
     "index",
+    "---Get started---",
+    "getting-started",
+    "---Product---",
     "protocol",
+    "tokenomics",
+    "---Integrations---",
     "integrations",
     "operations",
-    "security",
-    "onchain"
+    "---Reference---",
+    "onchain",
+    "security"
   ]
 }

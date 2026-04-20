@@ -1,22 +1,37 @@
 ---
 title: Program IDs
-description: Current source-declared xVault program IDs and their deployment status.
+description: xVault's three Anchor programs, their source-declared addresses, and deployment status.
 ---
 
-The program IDs below are the values currently declared in source. They should be treated as the planned xVault addresses for integration and documentation purposes.
+xVault is split into **three Anchor programs** on Solana. The IDs below are the addresses declared in source today; they are the planned xVault addresses for integration and documentation.
 
-> Deployment status: these program IDs are not yet documented as deployed and verified for a live target environment. Until a formal deployment announcement is published, treat them as source-level IDs still pending deployment rollout.
+<Callout type="warn" title="Pre-deployment">
+  These program IDs are not yet documented as deployed and verified for a live target environment.
+  Treat them as source-level IDs pending deployment. A formal deployment announcement will update
+  this page with cluster + slot metadata.
+</Callout>
 
 ## Current program IDs
 
-| Program | ID |
-| --- | --- |
-| `xvault_vault` | `A8gnNqXsVFon2h6wGwUWyBFMDY5nrjNJfc1FvW6k2LMm` |
-| `xvault_oracle` | `2VsYpWPX86ZMF2BCWZ9X6EiKe33ooHGLP5yPE4r1UnSU` |
+| Program          | ID                                             |
+| ---------------- | ---------------------------------------------- |
+| `xvault_vault`   | `A8gnNqXsVFon2h6wGwUWyBFMDY5nrjNJfc1FvW6k2LMm` |
+| `xvault_oracle`  | `2VsYpWPX86ZMF2BCWZ9X6EiKe33ooHGLP5yPE4r1UnSU` |
 | `xvault_rewards` | `6T7wbptCbfmzrmdrLeSfKCXDxJMrqcrk1UxLRJBS7y8m` |
+
+## Responsibilities
+
+| Program          | Owns                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| `xvault_vault`   | Vault state, deposits, withdrawals, rebalance bookkeeping, fee accrual, pause controls |
+| `xvault_oracle`  | Keeper-pushed NAV snapshots with per-leg multiplier-aware entries                      |
+| `xvault_rewards` | `$VLT` staking, lockup tracking, epoch Merkle roots, claim proofs                      |
+
+See [Architecture](/docs/protocol/architecture) for the full component map and data flow, and [Reference → Instructions](/docs/onchain/instructions) for the per-ix authority and effect table.
 
 ## Notes for integrators
 
-- Confirm deployment status before wiring production clients.
-- Expect IDL and SDK artifacts to remain the canonical source for instruction shapes.
-- Do not assume these IDs imply mainnet availability until the rollout is complete.
+- **Verify** deployment status before wiring production clients. The canonical status lives in this page and the release notes.
+- **IDL + SDK** artifacts are the canonical source for instruction layouts. Consume `packages/sdk` rather than hand-rolling account parsing.
+- **No mainnet assumption.** Do not assume these IDs imply mainnet availability until the rollout is complete.
+- **Squads authority.** All admin-authority ix require a Squads v4 multisig signer; integrating clients should expect multi-sig batching rather than single-wallet submission for those paths.

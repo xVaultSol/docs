@@ -1,0 +1,124 @@
+---
+title: FAQ
+description: Frequently asked questions about deposits, withdrawals, fees, corporate actions, and $VLT.
+---
+
+## Vaults and deposits
+
+<Accordions>
+
+<Accordion title="What do I actually hold when I deposit?">
+  A Token-2022 vault share minted by the `xvault_vault` program. The share is a claim on a pro-rata
+  slice of the vault's underlying xStock basket plus the USDC cash buffer. You can withdraw in-kind
+  at any time to collapse the share back into the underlying tokens.
+</Accordion>
+
+<Accordion title="Who picks the basket composition?">
+  xVault v1 ships a fixed set of curated, governance-defined SKUs: Mag 7, Semis, Dividend, and
+  SPY-Lite. User-created vaults are out of scope for v1 — it keeps the corporate-action and halt
+  response manageable. Weight changes are gated by multisig behind a 48h timelock.
+</Accordion>
+
+<Accordion title="How is NAV calculated?">
+  Every leg uses `raw_balance × multiplier × price`. The multiplier comes from Backed's Scaled UI
+  extension (updated for dividends, splits, and fee accrual); the price comes from the Backed
+  onchain oracle with Pyth as tertiary fallback. The oracle program stores the snapshot;
+  NAV-sensitive instructions reject reads older than 60 seconds during market hours.
+</Accordion>
+
+<Accordion title="What slippage controls exist?">
+  Deposits carry a user-signed `min_shares_out`. USDC withdrawals carry `max_slip_bps`, defaulting
+  to 1% and capped at 5%. Keeper rebalance legs enforce a per-leg drift bound configured per vault.
+</Accordion>
+
+</Accordions>
+
+## Fees
+
+<Accordions>
+
+<Accordion title="What fees do I pay?">
+- **Management fee:** 0.2% / year on TVL, streamed per-slot to the treasury.
+- **Performance fee:** 10% of positive NAV-per-share delta against the high-water mark.
+- **Withdrawal fee:** 0.05% flat, applied only on USDC withdrawals to offset slippage risk.
+
+In-kind withdrawals do not pay the withdrawal fee. Full schedule: [Fees](/docs/protocol/fees).
+
+</Accordion>
+
+<Accordion title="Can I reduce fees by holding $VLT?">
+  Tier-based fee discounts are specified in the tokenomics model but are **not yet implemented
+  on-chain**. Current deployments charge flat fees for all users. Track status at
+  [Tokenomics](/docs/tokenomics/vlt).
+</Accordion>
+
+</Accordions>
+
+## Corporate actions
+
+<Accordions>
+
+<Accordion title="What happens to my shares during a dividend?">
+  Cash and stock dividends are applied by Backed as a multiplier increase on the underlying xStock.
+  Your vault share is backed by the same raw balance but now represents a larger scaled amount, so
+  NAV-per-share rises. No action needed on your end.
+</Accordion>
+
+<Accordion title="What about splits?">
+  Forward, reverse, and unit splits are also multiplier changes. The vault program guards transfers
+  with a `MultiplierMismatch` check — if a multiplier update is mid-flight, transfers revert cleanly
+  rather than settle at stale scaled amounts.
+</Accordion>
+
+<Accordion title="Spin-offs, mergers, redemptions?">
+  These trigger an automatic vault pause. The multisig reviews the event, possibly re-initializes
+  the basket or force-exits the affected leg, then unpauses. See [Corporate
+  actions](/docs/integrations/corporate-actions) for the full mapping of `caType` → response.
+</Accordion>
+
+</Accordions>
+
+## Rewards and staking
+
+<Accordions>
+
+<Accordion title="Why are rewards paid in xStocks instead of $VLT?">
+  Real yield. Rewards come from protocol and Pump.fun revenue, converted into real equity exposure
+  rather than fresh token emissions. This insulates stakers from `$VLT` price volatility. `$VLT`
+  utility is governance, fee discounts (planned), and gated launch access — not buyback pressure.
+</Accordion>
+
+<Accordion title="What's the anti-gaming mechanism on staking?">
+  Rewards use time-weighted balances, not point-in-time snapshots. Minimum stake age is 7 days
+  before a wallet becomes eligible for a given epoch's payout. Staking five minutes before a
+  snapshot will not capture the epoch.
+</Accordion>
+
+<Accordion title="What happens if I don't claim?">
+  Unclaimed rewards roll forward into the next epoch's Merkle tree. They are never burned or
+  forfeited.
+</Accordion>
+
+</Accordions>
+
+## Security and availability
+
+<Accordions>
+
+<Accordion title="Who can pause a vault or change weights?">
+  A 3-of-5 Squads v4 multisig. Weight changes, fee changes, and keeper set changes are subject to a
+  48h timelock. Emergency pause is faster but still multisig-authorized. See
+  [Security](/docs/security/invariants).
+</Accordion>
+
+<Accordion title="Where can I verify proof of reserves?">
+  Each vault card on the dapp embeds a live PoR badge that calls `/public/proof-of-reserves/{symbol}
+  ` per leg. The Backed-signed attestation is the source of truth for underlying equity backing.
+</Accordion>
+
+<Accordion title="Is xVault available in the US?">
+  No. The frontend geofences US and OFAC-restricted jurisdictions at the edge, mirroring Backed's
+  own exclusion list. The clickwrap Terms of Service must be accepted before first wallet connect.
+</Accordion>
+
+</Accordions>

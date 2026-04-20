@@ -1,26 +1,63 @@
 ---
 title: Vault lineup
-description: The initial vault SKUs and how their strategies differ.
+description: The four initial vault SKUs — compositions, weighting, rebalance triggers, and pause policy.
 ---
 
-The first xVault release is built around a small set of curated, governance-defined baskets rather than user-generated vaults.
+xVault launches with **four curated, governance-defined SKUs**. Curation (as opposed to user-created vaults) keeps weight definitions auditable, corporate-action response operationally sane, and lets keeper policy be tuned per basket.
 
-## Planned SKUs
+## Initial SKUs
 
-| Vault | Ticker | Composition | Weighting | Rebalance trigger |
-| --- | --- | --- | --- | --- |
-| Mag 7 | `vMAG7` | AAPLx, MSFTx, NVDAx, GOOGLx, AMZNx, METAx, TSLAx | Equal-weight | 3% drift or 7 days |
-| Semis | `vCHIP` | NVDAx, AMDx, TSMx, AVGOx, INTCx | Market-cap | 3% drift or 7 days |
-| Dividend | `vDIV` | KOx, JNJx, PGx, XOMx | Equal-weight | 5% drift or 30 days |
-| SPY-Lite | `vSPY` | SPYx plus USDC buffer | Fixed 95/5 | 2% drift |
+| Vault        | Ticker  | Composition                                      | Weighting    | Rebalance trigger   |
+| ------------ | ------- | ------------------------------------------------ | ------------ | ------------------- |
+| **Mag 7**    | `vMAG7` | AAPLx, MSFTx, NVDAx, GOOGLx, AMZNx, METAx, TSLAx | Equal-weight | 3% drift or 7 days  |
+| **Semis**    | `vCHIP` | NVDAx, AMDx, TSMx, AVGOx, INTCx                  | Market-cap   | 3% drift or 7 days  |
+| **Dividend** | `vDIV`  | KOx, JNJx, PGx, XOMx                             | Equal-weight | 5% drift or 30 days |
+| **SPY-Lite** | `vSPY`  | SPYx + USDC buffer                               | Fixed 95 / 5 | 2% drift            |
 
-## Why curated vaults
+<Callout type="info" title="Cash buffer">
+  Every vault also carries a small USDC buffer (typically 0.5–5% TVL) to absorb deposits and
+  withdrawals without forcing an immediate rebalance. The buffer naturally refills from deposits;
+  the keeper liquidates to top it up only if it drops below the target floor.
+</Callout>
 
-- Weight definitions stay auditable.
-- Corporate-action response stays operationally manageable.
-- Keeper policies can be tailored per vault basket.
-- Governance retains control over index quality and replacement logic.
+## How weighting works
 
-## Pause conditions
+- **Equal-weight:** each leg carries the same target weight. Drift accrues through differential returns, and the keeper rebalances back to target on a scheduled cadence.
+- **Market-cap:** target weights are refreshed periodically from an external market-cap feed; drift is measured against the refreshed target.
+- **Fixed ratio:** the vault always targets the configured split (e.g. SPY-Lite at 95% SPYx / 5% USDC).
 
-Certain corporate actions require vault intervention rather than automatic continuation. Spin-offs, merger variants, redemption events, worthless removals, and rights distributions should pause affected vaults until multisig review is complete.
+All target weights are stored on-chain in the `vault_state` PDA and can only be mutated by the admin multisig behind a 48h timelock.
+
+## Rebalance triggers
+
+A rebalance kicks in when **either** of the vault-configured triggers fires:
+
+- **Drift-based:** any leg's deviation from target exceeds the threshold (2–5% depending on SKU).
+- **Time-based:** a rebalance has not occurred within the configured window (7, 30 days, etc.).
+
+The keeper runs `drift-scan` every 60 seconds, enqueues a rebalance job when a trigger fires, and executes legs individually — one xChange (or Jupiter) fill per `rebalance_leg` instruction.
+
+## Pause policy
+
+Certain corporate actions require vault intervention rather than automatic continuation. The keeper watches `/public/corporate-actions/upcoming` hourly and auto-pauses affected vaults for these event types:
+
+| `caType`             | Effect                                                                  |
+| -------------------- | ----------------------------------------------------------------------- |
+| `SpinOff`            | Pause; multisig decides whether to distribute the spin or exit the leg. |
+| `CashMerger`         | Pause; likely force-exit the leg and rebalance into the remainder.      |
+| `StockMerger`        | Pause; may require basket reconfiguration.                              |
+| `StockAndCashMerger` | Pause; hybrid — requires manual reconciliation.                         |
+| `Redemption`         | Pause; force-exit the affected leg.                                     |
+| `WorthlessRemoval`   | Pause; remove the leg and redistribute weight.                          |
+| `RightsDistribution` | Pause; rights are typically handled off-chain.                          |
+
+Paused vaults reject deposits and rebalances but still permit in-kind withdrawals so users are never trapped. See [Integrations → Corporate actions](/docs/integrations/corporate-actions) for the full mapping.
+
+## Why curated (for now)
+
+- **Auditable weights.** Every leg is traceable to a multisig-approved state transition.
+- **Tractable corporate actions.** 4 baskets × 13 `caType` events is a workable operational surface; arbitrary user-created vaults are not.
+- **Safer keeper policy.** Keeper parameters (slippage bounds, quote timeouts, fallback rules) are tuned per SKU.
+- **Governance-quality index selection.** Basket replacement is a multisig ix, not a free-for-all.
+
+Permissionless vault creation is on the roadmap for a later version, once corporate-action automation covers all 13 `caType` values without multisig intervention.

@@ -3,26 +3,64 @@
 @import 'fumadocs-ui/css/preset.css';
 
 :root {
-  --background: #f4f0e8;
-  --foreground: #171717;
+  /* Brand palette — derived from /public/brand/XVault.png + banner.png */
+  --background: #0b1020;
+  --background-elevated: #111831;
+  --foreground: #f4f5f8;
+  --surface: #141c2e;
+  --primary: #dc2f4a;
+  --primary-hover: #b91c37;
+  --accent: #f5b4a3;
+  --navy: #1a2744;
+  --border: #243049;
+  --muted: #8893ab;
+
+  /* Fumadocs UI overrides — map its design tokens onto the brand palette */
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-card: var(--surface);
+  --color-fd-card-foreground: var(--foreground);
+  --color-fd-popover: var(--background-elevated);
+  --color-fd-popover-foreground: var(--foreground);
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: var(--surface);
+  --color-fd-secondary-foreground: var(--foreground);
+  --color-fd-muted: var(--surface);
+  --color-fd-muted-foreground: var(--muted);
+  --color-fd-accent: var(--navy);
+  --color-fd-accent-foreground: var(--accent);
+  --color-fd-border: var(--border);
+  --color-fd-ring: var(--primary);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-elevated: var(--background-elevated);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-accent: var(--accent);
+  --color-navy: var(--navy);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-ibm-plex-mono);
 }
 
 html {
   scrollbar-gutter: stable;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
   background:
-    radial-gradient(circle at top, rgba(13, 148, 136, 0.12), transparent 30%),
-    linear-gradient(180deg, #fbf8f3 0%, #f4f0e8 100%);
+    radial-gradient(ellipse 80% 60% at 85% -10%, rgba(245, 180, 163, 0.12), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 50% 20%, rgba(220, 47, 74, 0.12), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 10% 5%, rgba(26, 39, 68, 0.9), transparent 70%),
+    var(--background);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-space-grotesk), sans-serif;
 }
@@ -34,4 +72,22 @@ a {
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
+}
+
+.brand-gradient {
+  background: linear-gradient(
+    115deg,
+    #0f1a33 0%,
+    #1a2744 25%,
+    #8a2239 55%,
+    #dc2f4a 75%,
+    #f5b4a3 100%
+  );
+}
+
+.brand-text-gradient {
+  background: linear-gradient(115deg, #ffffff 0%, #f5b4a3 55%, #dc2f4a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

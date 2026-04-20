@@ -1,0 +1,91 @@
+---
+title: On-chain invariants
+description: The guarantees every xVault instruction must uphold, enforced via require! checks and exercised by test suites.
+---
+
+Every balance-moving ix in xVault re-verifies a small set of invariants before executing. These are the guarantees the protocol makes on-chain; they are enforced by `require!` checks in the Anchor programs and exercised by the Mocha/Bankrun test suite.
+
+## Core invariants
+
+<Callout type="info" title="Every ix must hold these">
+  Violation means the instruction reverts cleanly with a typed error code. No balance or weight is
+  ever moved when an invariant fails.
+</Callout>
+
+- **NAV conservation:** `Σ raw_holdings_value_usd == vault_state.last_nav` ± rounding epsilon.
+- **Share accounting:** `vault_share_supply × nav_per_share == total_aum`.
+- **Weight sum:** `sum(target_weights) == 10_000` basis points.
+- **Multiplier match:** `multiplier_on_chain == expected_multiplier` before any transfer.
+- **NAV freshness:** `now - oracle.updated_at ≤ MAX_STALE_SECS` for NAV-sensitive ix (60 s market hours, 300 s off-hours).
+- **Halt gate:** for every asset in a vault, `isAtomicTradingHalted == false` **or** the vault is paused.
+- **Corp-action gate:** a pending corporate action of type `SpinOff | *Merger | Redemption | WorthlessRemoval | RightsDistribution` within 48 h of activation implies the vault is auto-paused.
+
+## Threat model
+
+| Asset                 | Attacker goal                    | Control                                                                 |
+| --------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| Vault xStock holdings | Drain via malicious ix           | Anchor invariants, fuzz tests, audits                                   |
+| Oracle NAV            | Manipulate to mint cheap shares  | Keeper multisig, staleness guard, Pyth tertiary fallback, deviation cap |
+| `$VLT` treasury       | Unauthorized transfer            | Squads v4 (3-of-5) multisig, 48 h timelock on param changes             |
+| Keeper private keys   | Sign a rogue rebalance           | HSM/KMS, per-slot tx cap, rate limits, canary alerts                    |
+| Frontend              | Phishing / supply-chain          | Subresource integrity, pinned deps, CSP, signed releases                |
+| User                  | MEV sandwich on deposit/withdraw | `min_shares_out` / `max_slip_bps`, private-RPC opt-in                   |
+
+## Error codes
+
+Each program declares its own `ErrorCode` enum. Representative entries from `programs/vault`:
+
+| Code                 | When it fires                                                             |
+| -------------------- | ------------------------------------------------------------------------- |
+| `AssetHalted`        | Asset system status reports atomic trading halted and vault isn't paused. |
+| `StaleNav`           | Oracle snapshot older than `MAX_STALE_SECS`.                              |
+| `MultiplierMismatch` | On-chain multiplier differs from the keeper-supplied expectation.         |
+| `SlippageExceeded`   | Rebalance leg delta exceeds the vault's `rebalance_slippage_bps`.         |
+| `VaultPaused`        | Deposit or rebalance attempted against a paused vault.                    |
+| `WeightSumInvalid`   | Proposed weights don't sum to 10 000 bps.                                 |
+| `MinSharesOutNotMet` | User's deposit slippage bound not satisfied.                              |
+| `MaxSlipBpsExceeded` | User's USDC-withdrawal slippage bound not satisfied.                      |
+
+## Authority boundaries
+
+| Actor                   | Allowed ix                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| User                    | `deposit`, `withdraw_in_kind`, `withdraw_usdc`, `stake`, `claim`                    |
+| Keeper (authorized set) | `rebalance_leg`, `distribute_epoch`, NAV snapshot updates                           |
+| Admin multisig (3-of-5) | `init_vault`, `set_paused`, `update_weights`, `update_keeper_set`, program upgrades |
+
+- **Timelock:** 48 h on weight changes, fee changes, keeper set changes, and program upgrades.
+- **Pause:** multisig-authorized; no timelock so emergency halts are fast.
+- **Upgrades:** program upgradability is planned to be renounced after 6 months of mainnet stability, via governance vote.
+
+## Audits
+
+| Scope                         | Vendor                            | Status                |
+| ----------------------------- | --------------------------------- | --------------------- |
+| `vault` program               | TBD (Neodyme / OtterSec / Zellic) | Scheduled pre-mainnet |
+| `oracle` + `rewards` programs | Same + independent reviewer       | Scheduled pre-mainnet |
+| Keeper service                | Internal + one external reviewer  | Before v1             |
+
+## Bug bounty
+
+Hosted on **Immunefi**, up to **$250 k for critical findings**, starting post-audit. Scope covers all programs plus the keeper signing path.
+
+## Incident response
+
+<Steps>
+
+<Step>**Pause** the affected vault within 1 minute of alert (guardian role).</Step>
+
+<Step>**Post-mortem** published on Discord and Mirror within 48 hours.</Step>
+
+<Step>**Migration vault** with patched code if user funds are at risk — snapshot and migrate.</Step>
+
+<Step>**Bounty payout** within 7 days post-incident, if applicable.</Step>
+
+</Steps>
+
+## Data and privacy
+
+- No PII collected from users.
+- Analytics: self-hosted Plausible, no cookies.
+- Wallet addresses are logged server-side only for indexing; deleted on request (GDPR).

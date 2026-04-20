@@ -1,43 +1,148 @@
 ---
 title: Protocol overview
-description: What xVault is, who it serves, and the operating model behind tokenized equity vaults.
+description: The xVault product model — what it is, who it serves, and the non-negotiable math rules underneath it.
 ---
 
-xVault packages baskets of tokenized equities into Solana vaults with a predictable operating model: deposit into a curated basket, mint vault shares, let the keeper manage drift, and distribute protocol rewards to VLT stakers in real xStock kind.
+xVault packages **tokenized equities into curated Solana index vaults**. A single deposit gives you exposure to a basket (Mag 7, Semis, Dividend, SPY-Lite), a keeper rebalances to target weights, and protocol revenue is split 50/50 between vault depositors and `$VLT` stakers — paid in real xStock kind, not in reward-token emissions.
+
+The product surface is intentionally small:
+
+- **Four curated vault SKUs** at launch, governance-curated (no user-created vaults in v1).
+- **USDC-in / USDC-out** deposits and withdrawals, with an optional in-kind withdrawal path.
+- **`$VLT` staking** with 30/90/180-day lockups, paying weekly epoch rewards in xStocks.
 
 ## Scope
 
-- Chain: Solana
-- Asset standard: Token-2022
-- Underlying assets: xStocks with Scaled UI multipliers
-- Rebalance routes: Backed xChange first, Jupiter fallback when xChange is unavailable or out of hours
-- Rewards: VLT staking with xStock-kind distribution
+| Dimension         | Scope                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| Chain             | Solana                                                                                  |
+| Asset standard    | Token-2022 with Scaled UI extension                                                     |
+| Underlying assets | xStocks issued by Backed Finance                                                        |
+| Execution routes  | Backed **xChange** (atomic RFQ) during market hours, **Jupiter** off-hours and on halts |
+| Reward asset      | Real xStock baskets, funded from protocol revenue                                       |
+| Jurisdictions     | Global excluding US and restricted regions (geofenced at the edge)                      |
+
+## Users and their jobs
+
+| Persona       | Job-to-be-done                                                         |
+| ------------- | ---------------------------------------------------------------------- |
+| DeFi native   | "Get S&P-style exposure in one transaction without leaving my wallet." |
+| Yield farmer  | "Stack rewards on top of TradFi beta."                                 |
+| `$VLT` holder | "Earn a share of protocol revenue in real stock shares."               |
+| Power user    | "Use vault shares as collateral on Kamino / margin platforms."         |
 
 ## Primary user flows
 
 ### Deposit
 
-Users deposit into a vault and receive proportional share tokens. Deposit math depends on fresh oracle-backed NAV and must respect raw-onchain accounting.
+<Steps>
+
+<Step>**Approve USDC.** User calls `vault::deposit(usdc_amount, min_shares_out)`.</Step>
+<Step>**Transfer.** Program receives USDC into the vault cash buffer.</Step>
+<Step>**Price.** Program reads total NAV (holdings + cash) from the `oracle` PDA.</Step>
+<Step>
+  **Mint.** Vault shares are minted pro-rata to NAV into the user's ATA, guarded by
+  `min_shares_out`.
+</Step>
+<Step>
+  **Rebalance.** The keeper reads the deposit event, buys the basket via xChange RFQ (market hours)
+  or Jupiter (off-hours), and submits `rebalance_leg` to validate execution and move USDC from the
+  buffer into holdings.
+</Step>
+
+</Steps>
 
 ### Withdraw
 
-Users can either withdraw a pro-rata in-kind basket or exit through a USDC route bounded by user-controlled slippage.
+Two modes:
 
-### Rebalance
+- **In-kind** — burn shares and receive raw xStock amounts pro-rata. No market risk, no slippage, no withdrawal fee.
+- **USDC** — burn shares and receive USDC with a user-set `max_slip_bps` (1% default, 5% max). The keeper sells xStocks as needed to meet demand. 0.05% withdrawal fee applies.
 
-The keeper computes weight drift, fetches multipliers and prices, requests xChange quotes during market hours, and falls back to Jupiter or skip logic when required.
+### Rebalance (keeper-only)
+
+<Steps>
+
+<Step>Keeper reads `/public/assets/*/price-data` and `/multiplier?network=Solana`.</Step>
+<Step>Computes drift vector vs. target weights using scaled NAV.</Step>
+<Step>Executes the external swap route (xChange during market hours, Jupiter fallback).</Step>
+<Step>
+  Submits `vault::rebalance_leg` to validate, book post-trade deltas, and enforce slippage bounds.
+</Step>
+
+</Steps>
+
+See [Operations → Keeper and oracles](/docs/operations/keeper-and-oracles) for the full job cadence and failure matrix.
 
 ### Stake and claim
 
-VLT holders stake into the rewards system and claim epochal xStock distributions funded from protocol economics.
+<Steps>
+
+<Step>User stakes `$VLT` into the `rewards` pool for 30d, 90d, or 180d.</Step>
+<Step>
+  Each Sunday 00:00 UTC the distributor snapshots time-weighted stake balances and buys the xStock
+  basket with the reward pool.
+</Step>
+<Step>
+  A Merkle root is published for that epoch; users claim with an inclusion proof from the dapp.
+</Step>
+<Step>Unstake after lockup returns the underlying `$VLT`.</Step>
+
+</Steps>
 
 ## Non-negotiable math rule
 
-All xStock balances on Solana use Token-2022 Scaled UI. That means:
+<Callout type="warn" title="Token-2022 Scaled UI">
+All xStock balances on Solana use the Scaled UI extension.
 
-```text
+```
 display_balance = raw_onchain_balance × current_multiplier
 ```
 
-Programs and transfer instructions must store and move raw amounts. NAV is the place where raw values are scaled.
+Programs and transfer instructions **must store and move raw amounts**. Scaling happens only inside NAV computations.
 
+</Callout>
+
+This invariant is the difference between a correctly-behaved index vault and one that silently drifts during fee accrual, dividends, or splits. Every balance-moving instruction re-verifies the expected multiplier before acting; every unit test exercises a non-unit multiplier.
+
+## Functional requirements (reference)
+
+| ID   | Requirement                                                                                                              |
+| ---- | ------------------------------------------------------------------------------------------------------------------------ |
+| F-1  | NAV uses `raw_amount × multiplier × price`.                                                                              |
+| F-2  | Deposits accepted in USDC; keeper orchestrates basket buys via xChange/Jupiter.                                          |
+| F-3  | Withdrawals in USDC with slippage cap = 1% default, user-overridable up to 5%.                                           |
+| F-4  | Rebalance is idempotent; fails safely if an xChange quote expires (~60–90s blockhash window).                            |
+| F-5  | Fees: 0.2%/yr management (streamed) + 10% of positive performance (HWM) + 0.05% withdrawal.                              |
+| F-6  | Proof-of-Reserves badge on UI: live per-holding call to `/public/proof-of-reserves/{symbol}`.                            |
+| F-7  | Corporate-action banner surfacing upcoming events from `/public/corporate-actions/upcoming` with all 13 `caType` values. |
+| F-8  | Auto-pause vault on `SpinOff`, `*Merger`, `Redemption`, `WorthlessRemoval`, `RightsDistribution` until multisig review.  |
+| F-9  | Primary NAV source: `/v2/oracles`. Fallback: indicative `price-data` only.                                               |
+| F-10 | USDC cash buffer refills from deposits; keeper liquidates to maintain the buffer if it falls below 0.5% TVL.             |
+
+## Out of scope for v1
+
+- Leverage and looping (separate product).
+- Perpetuals on vault shares.
+- Non-Solana deployments (bridge only).
+- User-created custom vaults — governance-curated only.
+
+## What to read next
+
+<Cards>
+  <Card
+    title="Vault lineup"
+    href="/docs/protocol/vaults"
+    description="The four initial SKUs — compositions, weighting, and rebalance triggers."
+  />
+  <Card
+    title="Architecture"
+    href="/docs/protocol/architecture"
+    description="Programs, services, data flow, and authority boundaries."
+  />
+  <Card
+    title="Fees"
+    href="/docs/protocol/fees"
+    description="Where fees come from and how they are distributed."
+  />
+</Cards>

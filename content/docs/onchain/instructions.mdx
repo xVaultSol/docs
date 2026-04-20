@@ -1,0 +1,53 @@
+---
+title: Instructions
+description: The public instruction surface of every xVault Anchor program, with authority and effect.
+---
+
+The canonical source for instruction layouts is the IDL, consumed via `packages/sdk`. This page is a navigation reference — read it to find the right ix; read the IDL for the exact account and argument shape.
+
+## `xvault_vault`
+
+| Instruction                            | Authority      | Effect                                                                                     |
+| -------------------------------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| `init_vault(args)`                     | Admin multisig | One-shot: configures SKU, holdings, fee params, keeper and admin authorities.              |
+| `deposit(usdc_amount, min_shares_out)` | User           | Transfers USDC in, reads NAV from `oracle`, mints shares pro-rata.                         |
+| `withdraw_in_kind(shares)`             | User           | Burns shares; returns raw pro-rata xStock amounts. No fee.                                 |
+| `withdraw_usdc(shares, max_slip_bps)`  | User           | Burns shares; pays USDC from the cash buffer. 0.05% fee.                                   |
+| `rebalance_leg(args)`                  | Keeper         | Validates and books the post-trade deltas of an xChange / Jupiter fill; enforces slippage. |
+| `collect_mgmt_fee()`                   | Permissionless | Mints streamed 0.2%/yr management fee to treasury.                                         |
+| `collect_perf_fee()`                   | Permissionless | HWM-based performance-fee collection.                                                      |
+| `set_paused(paused)`                   | Admin multisig | Emergency circuit breaker; disables deposit and rebalance, leaves in-kind withdrawals.     |
+| `update_weights(new_weights[])`        | Admin multisig | Updates target weights. Subject to 48 h timelock.                                          |
+
+## `xvault_oracle`
+
+| Instruction                    | Authority         | Effect                                                           |
+| ------------------------------ | ----------------- | ---------------------------------------------------------------- |
+| `init_snapshot(sku)`           | Admin multisig    | Creates the `nav_snapshot` PDA for a SKU (up to 20 leg entries). |
+| `push_snapshot(entries, sig)`  | Authorized keeper | Ed25519-verified NAV snapshot write; updates `updated_slot`.     |
+| `update_keeper_set(keepers[])` | Admin multisig    | Rotates the authorized keeper set. 48 h timelock.                |
+
+Staleness limits: 60 s market hours, 300 s off-hours. NAV-sensitive ix in `xvault_vault` revert with `StaleNav` if exceeded.
+
+## `xvault_rewards`
+
+| Instruction                               | Authority         | Effect                                                      |
+| ----------------------------------------- | ----------------- | ----------------------------------------------------------- |
+| `stake(amount, tier)`                     | User              | Locks `$VLT` into a 30/90/180 d pool with pro-rata weight.  |
+| `unstake(receipt)`                        | User              | Returns `$VLT` after the lockup expires.                    |
+| `distribute_epoch(epoch_id, merkle_root)` | Authorized keeper | Posts the Merkle root for that epoch's xStock payout.       |
+| `claim(proof, amounts[])`                 | User              | Claims the user's pro-rata basket using an inclusion proof. |
+
+## Common error codes
+
+| Code                 | Program          | When it fires                                         |
+| -------------------- | ---------------- | ----------------------------------------------------- |
+| `StaleNav`           | vault            | Oracle snapshot older than `MAX_STALE_SECS`.          |
+| `MultiplierMismatch` | vault            | On-chain multiplier differs from expected.            |
+| `SlippageExceeded`   | vault            | Rebalance leg delta exceeds `rebalance_slippage_bps`. |
+| `VaultPaused`        | vault            | Deposit / rebalance attempted on a paused vault.      |
+| `WeightSumInvalid`   | vault            | Proposed weights don't sum to 10 000 bps.             |
+| `AssetHalted`        | vault            | Asset's atomic trading halted and vault isn't paused. |
+| `KeeperUnauthorized` | oracle / rewards | Signer not in the authorized keeper set.              |
+
+See [Invariants](/docs/security/invariants) for the full set of on-chain guards and the authority boundary table.

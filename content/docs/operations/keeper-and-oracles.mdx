@@ -1,35 +1,140 @@
 ---
 title: Keeper and oracle operations
-description: Job cadence, stale data limits, quote handling, and automated pause behavior.
+description: Keeper job graph, NAV freshness, quote handling, and high-availability posture.
 ---
 
-The keeper is the operational core of xVault. It maintains fresh oracle data, scans for drift, executes rebalances, watches corporate actions, and prepares reward distribution epochs.
+The keeper is the **operational core** of xVault. It maintains fresh oracle data, scans for drift, executes rebalances, watches corporate actions, and closes weekly reward epochs. Oracles are the bridge between off-chain price / multiplier data and on-chain NAV calculations; keeper correctness and oracle freshness are the two pillars users rely on.
 
-## Core jobs
+## Jobs
 
-| Job | Purpose | Cadence |
-| --- | --- | --- |
-| `nav-push` | Fetch prices and multipliers, then write oracle snapshots | Every 15s in market hours, 60s off-hours |
-| `drift-scan` | Compare current weights against target weights | Every 60s |
-| `rebalance-exec` | Request xChange RFQs, validate, co-sign, and submit | Triggered by drift |
-| `corp-action-watcher` | Detect upcoming actions that require pausing | Hourly |
-| `epoch-distributor` | Publish weekly reward distribution roots | Weekly |
+| Job                 | Purpose                                                              | Cadence                            |
+| ------------------- | -------------------------------------------------------------------- | ---------------------------------- |
+| `nav-push`          | Fetch prices + multipliers, write `oracle` PDA snapshots             | 15 s market hours / 60 s off-hours |
+| `drift-scan`        | Compute per-vault drift vs. target weights, enqueue rebalance jobs   | 60 s                               |
+| `rebalance-exec`    | Request xChange RFQ (or Jupiter quote), co-sign, submit, confirm     | Triggered by drift                 |
+| `corp-action-watch` | Poll upcoming corporate actions, alert / auto-pause on severe events | Hourly                             |
+| `deposit-router`    | On deposit event: buy basket, validate via `rebalance_leg`           | Event-driven                       |
+| `withdrawal-router` | On USDC withdrawal event: sell xStocks, refill cash buffer           | Event-driven                       |
+| `collect-mgmt-fee`  | Permissionless trigger of management-fee collection                  | Daily                              |
+| `epoch-distributor` | Sweep Pump.fun fees, build Merkle distribution, post epoch root      | Weekly (Sunday 00:00 UTC)          |
 
-## Freshness and fallback
+All jobs run through a Bull queue on Redis. Each job is idempotent on job ID so retries never double-execute a rebalance.
 
-- Market-hours NAV should remain fresh within roughly 60 seconds.
-- Off-hours tolerances can be looser, but stale NAV should still block NAV-sensitive actions.
-- xStocks `/v2/oracles` is the primary price source.
-- `/public/assets/{symbol}/price-data` is only a fallback indicative quote.
+## NAV freshness
 
-## Corporate-action response
+```
+MAX_STALE_SECS = 60    // market hours
+MAX_STALE_SECS = 300   // off-hours
+```
 
-Automatic pause behavior is required for:
+NAV-sensitive instructions (`deposit`, `withdraw_*`, `collect_perf_fee`) revert with `StaleNav` if the oracle snapshot is older than `MAX_STALE_SECS`. The `nav-push` job targets a **p95 ≤ 30 s** latency during market hours.
 
-- spin-offs,
-- merger events,
-- redemption,
-- worthless removal,
-- rights distribution.
+Sources, in priority order:
 
-These are operationally sensitive and should not be handled as silent background changes.
+1. **Primary:** `/v2/oracles` — Backed's on-chain oracle feed.
+2. **Secondary:** `/public/assets/{symbol}/price-data` — indicative `quote` only, marked `source=Indicative`.
+3. **Tertiary:** Pyth equity feed for overlapping tickers (cross-check only).
+
+Indicative prices are _never_ treated as authoritative. If the primary oracle is stale and only the indicative quote is available, NAV-sensitive ix continue to revert — better to block for a few minutes than mint at a wrong price.
+
+## Rebalance execution
+
+<Steps>
+
+<Step>
+  **Drift scan.** `drift-scan` reads `vault_state.holdings[]` and the latest `oracle` snapshot,
+  computes scaled weights, and emits a job if any leg exceeds its drift threshold or the time-based
+  trigger fires.
+</Step>
+
+<Step>
+  **Route decision.** `rebalance-exec` checks `tradingHoursMode` and `isAtomicTradingHalted` for
+  each leg. MarketHours assets outside market hours **must** use Jupiter or skip.
+</Step>
+
+<Step>
+  **Quote.** xChange RFQ or Jupiter v6 swap. Prefer `cashAmount` (USD notional) over `quantity` so
+  sizing stays NAV-anchored.
+</Step>
+
+<Step>
+  **Validate.** Prepend `vault::rebalance_leg(expected_mint, expected_amount_raw)` which introspects
+  sibling ixs via `SysvarInstructions` to confirm the quoted transfer matches expectations.
+</Step>
+
+<Step>
+  **Co-sign and submit** before the blockhash window expires (xChange: 60–90 s, enforced per-asset
+  via `/trades/xchange/assets`).
+</Step>
+
+<Step>
+  **Confirm.** Poll `getSignatureStatuses` with `finalized` commitment. For xChange also poll `GET
+  /trades/xchange/quote/{id}` until `generalStatus == Completed` and `blockchainStatus == Executed`.
+</Step>
+
+<Step>
+  **Retry or fall back.** On `ExpiredExecution`: re-quote up to 3 times, then switch to Jupiter. On
+  persistent Jupiter failure: skip the leg and alert.
+</Step>
+
+</Steps>
+
+## Retry and backoff policy
+
+- **API retries:** exponential backoff 250 ms → 4 s, max 5 attempts, ±20% jitter. Honor `Retry-After` on 429; never retry 4xx on `/rfq`.
+- **Rebalance retries:** max 3 per leg before falling back to the alternate route or skipping. Alert on skip.
+- **Blockchain retries:** rebuild the tx with a fresh blockhash before each retry.
+
+## High-availability posture
+
+- Leader election via **Redis Redlock**; two keeper replicas in separate AZs.
+- Only the leader signs and submits; the follower maintains warm state and takes over within 30 s on leader loss.
+- Signing keys live in an HSM/KMS; keepers carry per-slot transaction rate limits and canary alerts for unexpected volume.
+
+**Availability target:** 99.5%.
+
+## Observability
+
+- Structured logs shipped to the ops sink; one log line per job iteration with `job`, `sku`, `leg`, `route`, `result`.
+- Metrics (Prometheus): `nav_push_latency_seconds`, `drift_scan_legs_flagged`, `rebalance_slippage_bps`, `xchange_quote_expiry_ratio`, `jupiter_fallback_count`.
+- Alerts: NAV staleness > `MAX_STALE_SECS` for > 2 min, rebalance skip on any leg, Jupiter fallback rate > 5% over 1 h.
+
+## Corporate-action automation
+
+`corp-action-watch` triggers `set_paused(true)` automatically for severe `caType` values within 48 h of activation. Full mapping: [Corporate actions](/docs/integrations/corporate-actions).
+
+## Infrastructure budget (Helius Developer tier)
+
+- `nav-push` at 30 s market / 60 s off = ~100 k RPC / month per vault, comfortably under 1 M credits for 4 vaults.
+- Webhook events ~5 k/day across three programs = 150 k credits / month.
+- Frontend DAS calls (`getAssetsByOwner`) SWR-cached at 60 s TTL, budgeted ~2 M credits / month at 5 k MAU.
+- **Never** loop Enhanced Transactions (100 credits each). Use raw `getSignaturesForAddress` + `getTransaction` + Anchor IDL decoding.
+- **Never** use `getTransactionsForAddress` for backfills.
+- Batch keeper reads via `getMultipleAccounts`.
+
+## Operational invariants
+
+- `MarketHours` assets route through Jupiter (or skip) outside market hours.
+- Rebalance legs reject quotes whose mint or raw-amount shape doesn't match `rebalance_leg` expectations.
+- NAV-sensitive ix revert on any stale snapshot.
+- Keeper signatures are valid only from wallets in the authorized keeper set on the `oracle` program.
+
+## Related
+
+<Cards>
+  <Card
+    title="Architecture"
+    href="/docs/protocol/architecture"
+    description="Where the keeper and oracle sit in the system diagram."
+  />
+  <Card
+    title="Corporate actions"
+    href="/docs/integrations/corporate-actions"
+    description="How the watcher job maps `caType` to pause policy."
+  />
+  <Card
+    title="Invariants"
+    href="/docs/security/invariants"
+    description="On-chain guards that back up keeper behavior."
+  />
+</Cards>

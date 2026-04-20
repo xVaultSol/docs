@@ -1,36 +1,225 @@
 ---
 title: xStocks and routing
-description: How xVault uses xStocks data, Backed xChange RFQs, and Jupiter fallback paths.
+description: How xVault consumes the xStocks API, handles Scaled-UI multipliers, and chooses between xChange and Jupiter.
 ---
 
-xVault integrates with xStocks for asset metadata, multipliers, system status, proof of reserves, and RFQ-based trading. Jupiter is the fallback execution path when xChange is unavailable or when trading-hours rules require it.
+xVault integrates with **Backed's xStocks API** for asset metadata, multipliers, system status, proof of reserves, and atomic RFQ trading. **Jupiter** is the fallback execution route when xChange is unavailable or trading-hours rules require it.
 
-## Public endpoints xVault depends on
+All integration code lives in `packages/xstocks-client`; dapp and keeper code should consume that wrapper rather than calling `fetch` directly.
 
-- `/public/assets`
-- `/public/assets/{symbol}`
-- `/public/assets/{symbol}/price-data`
-- `/public/assets/{symbol}/multiplier?network=Solana`
-- `/public/system/status/{symbol}`
-- `/public/corporate-actions/upcoming`
-- `/public/proof-of-reserves/{symbol}`
-- `/v2/oracles` and `/v2/oracles/{symbol}`
+## Environments
 
-## Trading-hours rule
+| Environment | Base URL                             |
+| ----------- | ------------------------------------ |
+| Production  | `https://api.xstocks.fi/api/v2`      |
+| Staging     | `https://api.stage.backed.fi/api/v2` |
+| Dev         | `https://api.dev.backed.fi/api/v2`   |
 
-For assets marked `MarketHours`, the keeper must not use xChange outside market hours. The correct behavior is:
+**Auth.** `X-API-Key` header is required only for `/client/*`, `/trades/*`, and `/bridges/*`. Everything under `/public/*` and `/v2/oracles/*` is open.
 
-- use xChange during supported market hours,
-- fall back to Jupiter if atomic trading is unavailable,
-- skip the leg if the asset is halted and no safe route exists.
+## Endpoints xVault depends on
 
-## Solana-specific RFQ notes
+### Public (no auth)
 
-- Solana xChange returns a base64-encoded partially-signed `VersionedTransaction`.
-- The quote lifetime is tied to blockhash validity rather than a fixed timestamp.
-- Receiving wallets must have the required ATAs before submission.
-- xVault prepends a validation instruction before submission to confirm the quote matches the expected raw asset flow.
+| Endpoint                                         | Used by                 | Cadence                 |
+| ------------------------------------------------ | ----------------------- | ----------------------- |
+| `GET /public/assets`                             | Keeper bootstrap        | On start + daily        |
+| `GET /public/assets/{symbol}`                    | UI asset detail         | On demand               |
+| `GET /public/assets/{symbol}/price-data`         | Keeper NAV fallback     | 30 s (indicative only)  |
+| `GET /public/assets/{symbol}/multiplier`         | Keeper NAV push         | 60 s (`network=Solana`) |
+| `GET /public/assets/{symbol}/multiplier/history` | UI corp-action timeline | On demand               |
+| `GET /public/system/status/{symbol}`             | Keeper pre-trade gate   | Every rebalance         |
+| `GET /public/corporate-actions/upcoming`         | Watcher job             | Hourly                  |
+| `GET /public/corporate-actions/history`          | UI history              | On demand               |
+| `GET /public/proof-of-reserves/{symbol}`         | UI PoR badge            | 5 min SWR               |
+| `GET /v2/oracles` / `/v2/oracles/{symbol}`       | Keeper NAV (primary)    | 15 s market / 60 s off  |
 
-## Multiplier handling
+### Client (Backed-onboarded, v2 feature)
 
-Multipliers are polled off-chain and fed into NAV snapshots. Transfers remain raw even when the displayed balance changes.
+Primary-market access requires KYC/AML onboarding with Backed and a whitelisted wallet. For xVault that whitelist target is the **vault PDA authority** — never end users. Until onboarded, xVault operates xChange-only through a company wallet that CPIs into the vault.
+
+| Endpoint                              | Purpose                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `POST /trades/xchange/rfq`            | Request atomic swap quote (Solana: blockhash-bound)                       |
+| `GET /trades/xchange/quote/{id}`      | Poll 3-axis status (`generalStatus`, `hedgingStatus`, `blockchainStatus`) |
+| `GET /trades/xchange/assets`          | Live tradable list: bid/ask cents, min/max, `tradingHoursMode`            |
+| `GET /trades/market/fees`             | Fee schedule per operation                                                |
+| `GET /client/registered-wallets`      | Whitelisted wallet state                                                  |
+| `GET /client/limits`, `/client/usage` | Per-asset tx limits and rolling usage                                     |
+
+## Critical integration rules
+
+### 1. Scaled UI balances
+
+xStocks on Solana use the Token-2022 Scaled UI extension.
+
+```
+display_balance = raw_onchain_balance × current_multiplier
+```
+
+- **Store raw amounts** in `vault_state`.
+- **Compute NAV with scaled amounts:** `Σ (raw_i × multiplier_i × price_i)`.
+- **Build instructions with raw amounts** — never scaled.
+
+This is the single most common integration bug in Token-2022 indexers. Every vault-touching unit test must exercise a non-unit multiplier; a PR that changes balance math without such a test is invalid by policy.
+
+### 2. Multiplier drift
+
+Poll `/multiplier?network=Solana` at least hourly. Response shape:
+
+```json
+{
+  "currentMultiplier": "1.00000000",
+  "newMultiplier": "1.00012345",
+  "activationDateTime": "2026-04-22T13:30:00Z",
+  "reason": "FeeAccrual"
+}
+```
+
+`reason` enum: `FeeAccrual | Dividend | Split | ReverseSplit | Administrative`.
+
+<Callout type="warn" title="FeeAccrual is not free">
+  `FeeAccrual` is Backed's own management fee applied via multiplier decay. It is small but
+  continuous, and it must be reflected in NAV projections — if you ignore it you will over-report
+  APY.
+</Callout>
+
+When `newMultiplier != currentMultiplier` and `activationDateTime - now < 1h`, freeze new deposits and withdrawals for the affected asset until the on-chain multiplier update settles. Surface the reason + activation time in the UI banner.
+
+### 3. Trading-hours gating
+
+`/trades/xchange/assets` exposes `tradingHoursMode` per asset:
+
+| Mode             | Window                                                |
+| ---------------- | ----------------------------------------------------- |
+| `MarketHours`    | 09:30–16:00 ET, Mon–Fri (US holiday calendar applies) |
+| `TwentyFourFive` | Sun 20:00 ET → Fri 20:00 ET                           |
+| `Always`         | 24/7                                                  |
+
+```ts
+if (asset.tradingHoursMode === 'MarketHours' && !inMarketHours()) {
+  useJupiter();
+} else if (asset.isAtomicTradingHalted) {
+  useJupiter();
+} else {
+  useXChange();
+}
+```
+
+<Callout type="error" title="Non-negotiable">
+  `MarketHours` assets **must not** route through xChange outside market hours. Either fall back to
+  Jupiter or skip the leg. This is enforced by the keeper and backed by a pre-commit check.
+</Callout>
+
+### 4. Halt handling
+
+Before every trade, pull `GET /public/system/status/{symbol}`:
+
+- `isMarketTradingHalted` — TradFi halted. Block primary-market issuance/redemption.
+- `isAtomicTradingHalted` — xChange disabled. Fall back to Jupiter (or skip if Jupiter also lacks depth).
+
+### 5. xChange RFQ lifecycle (Solana-specific)
+
+Solana xChange is not a contract — settlement is literal SPL / Token-2022 transfers plus a memo instruction.
+
+- The RFQ response `signature` is a **base64-encoded partially-signed `VersionedTransaction`**, not a cryptographic signature.
+- `signaturePayload` is the structured swap message for introspection.
+- Expiry is **blockhash validity** (~60–90 s), not a unix timestamp.
+- The receiving wallet **must have ATAs for both the xStock mint and the stablecoin mint** before submission.
+- Per-asset `quoteValiditySeconds` and `executionTimeoutSeconds` come from `/trades/xchange/assets` — never hardcode 60.
+
+RFQ parameters are mutually exclusive:
+
+- `quantity` — exact xStock amount to buy or sell.
+- `cashAmount` — exact stablecoin amount to spend or receive. **Preferred for rebalancing** since we think in USD-scaled NAV.
+
+**End-to-end flow:**
+
+<Steps>
+
+<Step>Ensure vault ATAs exist for the xStock mint and USDC mint.</Step>
+
+<Step>`POST /trades/xchange/rfq` with `paymentWalletIdentifier == receivingWalletIdentifier == vault_PDA`. Response: `{ id, signature: base64Tx, signaturePayload }`.</Step>
+
+<Step>Deserialize: `VersionedTransaction.deserialize(Buffer.from(signature, 'base64'))`.</Step>
+
+<Step>
+  Prepend `vault::rebalance_leg(expected_mint, expected_amount_raw)` to introspect sibling ixs via
+  `SysvarInstructions` — defense-in-depth if the quote is wrong.
+</Step>
+
+<Step>Co-sign with vault authority (multisig CPI).</Step>
+
+<Step>`sendRawTransaction` before blockhash expires.</Step>
+
+<Step>
+Poll `GET /trades/xchange/quote/{id}` until terminal. Treat the trade as done only when `generalStatus == Completed` **and** `blockchainStatus == Executed`.
+
+Status enums:
+
+- `generalStatus ∈ {Provided, Accepted, Completed, Expired, Cancelled}`
+- `hedgingStatus ∈ {NotStarted, PendingHedge, InProgress, Succeeded, Failed, Unwinding, Unwound}`
+- `blockchainStatus ∈ {NotReady, GeneratingSignature, PendingExecution, Executed, ExpiredExecution, Failed}`
+
+</Step>
+
+<Step>On `ExpiredExecution` → re-quote (max 3 attempts), then fall back to Jupiter.</Step>
+
+</Steps>
+
+### 6. Jupiter fallback
+
+When xChange is unavailable (halt, off-hours for a `MarketHours` asset, repeated quote expiry), the keeper routes through Jupiter:
+
+1. Quote via Jupiter v6 swap API with the same `cashAmount` notional.
+2. Enforce the same `max_slip_bps` from the vault config.
+3. Prepend `rebalance_leg` for symmetric validation.
+4. Submit and confirm with finalized commitment.
+
+Jupiter is not a primary path — it's wider-spread than xChange — but it's what keeps a vault tradable around TradFi closes and during xChange maintenance.
+
+## Client wrapper
+
+```ts
+export class XStocksClient {
+  constructor(private cfg: { baseUrl: string; apiKey?: string }) {}
+
+  // Public
+  listAssets(): Promise<Asset[]>;
+  getPrice(symbol: string): Promise<PriceData>;
+  getMultiplier(symbol: string): Promise<MultiplierState>;
+  getSystemStatus(symbol: string): Promise<SystemStatus>;
+  getProofOfReserves(symbol: string): Promise<PoR>;
+  getUpcomingCorpActions(): Promise<CorpAction[]>;
+
+  // Client-auth
+  requestRfq(params: RfqParams): Promise<Quote>;
+  getQuote(id: string): Promise<Quote>;
+  listXChangeAssets(): Promise<XChangeAsset[]>;
+}
+```
+
+**Retry policy:** exponential backoff (250 ms → 4 s), max 5 attempts, ±20% jitter. Public responses are cached in Redis at the SWR intervals above. Honor `Retry-After` on 429; alert if 5xx persists > 5 minutes; never retry a 4xx on `/rfq`.
+
+## Environment variables
+
+```
+XSTOCKS_API_URL=https://api.xstocks.fi/api/v2
+XSTOCKS_API_KEY=          # only for /client/*, /trades/*, /bridges/*
+XSTOCKS_TIMEOUT_MS=5000
+```
+
+## Related
+
+<Cards>
+  <Card
+    title="Corporate actions"
+    href="/docs/integrations/corporate-actions"
+    description="How xVault responds to each of the 13 `caType` events."
+  />
+  <Card
+    title="Keeper and oracles"
+    href="/docs/operations/keeper-and-oracles"
+    description="Where these API calls slot into the keeper job graph."
+  />
+</Cards>

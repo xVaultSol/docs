@@ -1,0 +1,147 @@
+---
+title: Quickstart
+description: Deposit into a vault, withdraw, and stake $VLT in three short walkthroughs.
+---
+
+This page walks through the three flows every user touches: depositing into a vault, withdrawing, and staking `$VLT` for a share of epoch rewards.
+
+<Callout type="warn" title="Not available to US persons">
+  xStocks are not offered to US persons or residents of jurisdictions restricted by Backed Finance.
+  The xVault dapp geofences these regions. See [Compliance](/docs/security/compliance).
+</Callout>
+
+## Prerequisites
+
+- A Solana wallet (Phantom, Solflare, Backpack).
+- **USDC** on Solana for deposits; **SOL** for transaction fees.
+- For staking: **`$VLT`** held in the same wallet. [Get `$VLT` on Pump.fun](https://pump.fun) — the official mint is `7xChXw8fyaz8FSEm2dwXcnR1kYbQMTtYayJ9Mm4Fpump`.
+
+## Deposit into a vault
+
+<Steps>
+
+<Step>
+
+### Pick a vault
+
+Open the [xVault dapp](https://xvault.fi), connect your wallet, and choose one of the curated SKUs:
+
+| Vault    | Ticker  | Theme                        |
+| -------- | ------- | ---------------------------- |
+| Mag 7    | `vMAG7` | Equal-weight mega-cap tech   |
+| Semis    | `vCHIP` | Market-cap-weighted semis    |
+| Dividend | `vDIV`  | Equal-weight dividend payers |
+| SPY-Lite | `vSPY`  | SPYx with a 5% USDC buffer   |
+
+Each card shows live NAV, the composition donut, and proof-of-reserves badges. See [Vault lineup](/docs/protocol/vaults) for details.
+
+</Step>
+
+<Step>
+
+### Enter an amount and submit
+
+Enter the USDC amount you want to deposit. The dapp previews the share amount you will receive using the current on-chain NAV snapshot. Confirm the transaction in your wallet.
+
+The program:
+
+1. Transfers your USDC into the vault's cash buffer.
+2. Reads the latest NAV from the `oracle` PDA.
+3. Mints a pro-rata amount of vault shares to your ATA, guarded by your `min_shares_out` slippage.
+
+</Step>
+
+<Step>
+
+### Keeper buys the basket
+
+A keeper sees the deposit event, requests an xChange RFQ during market hours (or a Jupiter quote off-hours), co-signs the trade, and submits `rebalance_leg` to book the execution. Your share balance is already live; the underlying basket just rebalances into it.
+
+</Step>
+
+</Steps>
+
+## Withdraw
+
+<Steps>
+
+<Step>
+
+### Choose a withdrawal mode
+
+- **In-kind:** burn shares and receive raw xStock amounts pro-rata. No slippage, but you own the individual legs afterwards.
+- **USDC:** burn shares and receive USDC. The keeper sells xStocks as needed, bounded by your `max_slip_bps` (default 1%, overridable up to 5%). A 0.05% withdrawal fee applies.
+
+</Step>
+
+<Step>
+
+### Confirm the transaction
+
+The dapp shows the estimated USDC-out (or the in-kind basket) and the applicable fee. On submit the program burns your shares atomically; for USDC withdrawals, the keeper rebalances behind the scenes to top up the cash buffer.
+
+</Step>
+
+</Steps>
+
+## Stake `$VLT` for epoch rewards
+
+<Steps>
+
+<Step>
+
+### Open the staking page
+
+Navigate to [xvault.fi/stake](https://xvault.fi/stake). Balances and lockup tiers are shown per-wallet.
+
+</Step>
+
+<Step>
+
+### Pick a lockup
+
+| Lockup | Reward weight | Who it suits                             |
+| ------ | ------------- | ---------------------------------------- |
+| 30d    | Pro-rata      | Rotate in and out around catalysts       |
+| 90d    | Pro-rata      | Balanced passive exposure                |
+| 180d   | Pro-rata      | Long-term stakers maximizing time-weight |
+
+All tiers use pro-rata time-weighted balance. There are no boost multipliers — lockup length only affects how long you're eligible.
+
+</Step>
+
+<Step>
+
+### Claim weekly
+
+Each Sunday 00:00 UTC, the keeper:
+
+1. Sweeps Pump.fun trading fees into the treasury.
+2. Combines them with vault protocol revenue.
+3. Buys xStocks with the combined pool and publishes two Merkle trees: one for depositors, one for stakers.
+
+You claim from [xvault.fi/rewards](https://xvault.fi/rewards) with an inclusion proof. Unclaimed rewards roll into the next epoch — they are never forfeited.
+
+</Step>
+
+</Steps>
+
+## Next steps
+
+<Cards>
+  <Card
+    title="FAQ"
+    href="/docs/getting-started/faq"
+    description="Common questions on fees, corporate actions, and withdrawal behavior."
+  />
+  <Card
+    title="Vault lineup"
+    href="/docs/protocol/vaults"
+    description="Composition, weighting, and rebalance triggers per SKU."
+  />
+  <Card
+    title="$VLT tokenomics"
+    href="/docs/tokenomics/vlt"
+    description="Supply, utility tiers, and reward mechanics."
+  />
+</Cards>

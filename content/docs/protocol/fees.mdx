@@ -1,0 +1,75 @@
+---
+title: Fees
+description: How protocol fees are sized, when they accrue, and where the revenue flows.
+---
+
+xVault has three fee surfaces, all denominated and settled in USDC on-chain:
+
+| Fee               | Rate                          | Basis                             | When it accrues               |
+| ----------------- | ----------------------------- | --------------------------------- | ----------------------------- |
+| Management        | **0.20% / year**              | TVL, streamed per-slot            | Continuous (accrues per slot) |
+| Performance       | **10%** of positive NAV delta | NAV-per-share vs. high-water mark | On `collect_perf_fee`         |
+| Withdrawal (USDC) | **0.05%** flat                | Gross USDC amount withdrawn       | At withdraw time              |
+
+In-kind withdrawals do not pay the withdrawal fee.
+
+## Management fee
+
+The management fee is streamed: the `vault_state` PDA tracks `last_fee_collection_ts`, and any caller can invoke the permissionless `collect_mgmt_fee` instruction to mint the accrued fee to the treasury share account.
+
+```
+fee_shares = share_supply × (now - last_ts) / SECS_PER_YEAR × MGMT_FEE_BPS / 10_000
+```
+
+Because it's streamed, fee dilution is linear with time — there's no "cliff" at the end of the year. The keeper triggers it daily to keep dilution events small.
+
+## Performance fee
+
+Performance is measured against a **high-water mark (HWM)** on NAV-per-share. The fee is 10% of the positive delta since the previous HWM, applied by minting shares to the treasury. Losses must be fully recovered before a new performance fee can accrue.
+
+```
+if nav_per_share > hwm_nav_per_share:
+    fee_shares = share_supply × (nav_per_share - hwm_nav_per_share) / nav_per_share × PERF_FEE_BPS / 10_000
+    hwm_nav_per_share = nav_per_share
+```
+
+## Withdrawal fee
+
+The 0.05% withdrawal fee applies only to **USDC-route withdrawals** and compensates for the slippage risk the keeper takes when selling xStocks to meet USDC demand. It is deducted from the gross USDC amount before transfer.
+
+```
+net_usdc = gross_usdc × (1 - WITHDRAW_FEE_BPS / 10_000)
+```
+
+In-kind withdrawals bypass the keeper entirely (pro-rata raw xStock transfer) and pay no fee.
+
+## Fee-discount tiers (planned)
+
+The tokenomics model defines tier-based fee discounts:
+
+| Tier   | `$VLT` held | Fee discount |
+| ------ | ----------- | ------------ |
+| Bronze | ≥ 10,000    | 25%          |
+| Silver | ≥ 100,000   | 50%          |
+| Gold   | ≥ 1,000,000 | 100%         |
+
+<Callout type="warn" title="Not yet implemented">
+  Fee-discount tiers are specified in the product design but are **not yet implemented on-chain**.
+  Current deployments charge the flat rates above for every user. Status is tracked in the [$VLT
+  tokenomics](/docs/tokenomics/vlt) page.
+</Callout>
+
+## Where the revenue goes
+
+Protocol revenue (management + performance + withdrawal fees) plus the weekly Pump.fun trading-fee sweep are pooled and split:
+
+```
+┌──── 100% combined revenue (vault + Pump.fun) ────┐
+│                                                   │
+│  50% → Vault depositor rewards (xStock kind)     │
+│  50% → $VLT staker rewards (xStock kind)         │
+│                                                   │
+└───────────────────────────────────────────────────┘
+```
+
+Both halves are converted into actual xStock baskets at epoch close — see [Tokenomics → Reward mechanics](/docs/tokenomics/vlt#epoch-reward-mechanics) for the end-to-end flow.

@@ -1,0 +1,152 @@
+---
+title: $VLT tokenomics
+description: Supply, utility, staking tiers, and the weekly epoch reward mechanic — paid in real xStocks.
+---
+
+`$VLT` is xVault's governance and utility token. It launches fair on Pump.fun (no team, VC, or insider allocation) and gives holders a claim on protocol revenue — **paid in real xStocks** rather than inflationary emissions.
+
+<Callout type="info" title="Official $VLT mint">
+`7xChXw8fyaz8FSEm2dwXcnR1kYbQMTtYayJ9Mm4Fpump`
+
+Always verify before you buy. There are no other `$VLT` mints associated with xVault.
+
+</Callout>
+
+## Launch
+
+| Property   | Value                                                                     |
+| ---------- | ------------------------------------------------------------------------- |
+| Venue      | Pump.fun fair launch; auto-bonds to Raydium / Meteora at $69 k market cap |
+| Supply     | **1,000,000,000** `$VLT` (Pump.fun default)                               |
+| Allocation | **100%** to the bonding curve — no team, VC, or insider allocation        |
+| LP         | Locked at bond under Pump.fun launch mechanics                            |
+
+## Utility
+
+| Surface      | Effect                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| Fee discount | Tier-gated holdings of `$VLT` → 25% / 50% / 100% off management + performance fees (**not yet implemented**) |
+| Staking      | Stake `$VLT` 30 d / 90 d / 180 d → pro-rata reward participation (no boost)                                  |
+| Governance   | Vote on new vault SKUs, target weights, and fee parameters (48 h timelock) (**not yet implemented**)         |
+| Gated drops  | Early access to new vault SKUs during the first 72 h of listing                                              |
+
+### Tier gates (non-staked)
+
+| Tier   | `$VLT` held | Fee discount |
+| ------ | ----------- | ------------ |
+| Bronze | ≥ 10,000    | 25%          |
+| Silver | ≥ 100,000   | 50%          |
+| Gold   | ≥ 1,000,000 | 100%         |
+
+### Staking tiers (locked)
+
+| Lockup | Reward rate | Early-unstake penalty                           |
+| ------ | ----------- | ----------------------------------------------- |
+| 30 d   | Pro-rata    | 10% slash to treasury (**not yet implemented**) |
+| 90 d   | Pro-rata    | 25% (**not yet implemented**)                   |
+| 180 d  | Pro-rata    | 50% (**not yet implemented**)                   |
+
+<Callout type="warn" title="Implementation status">
+  Fee discounts, governance, and early-unstake penalties are specified but not yet live on-chain.
+  Current deployments charge flat fees, have no lockup penalty, and rely on multisig for governance
+  decisions. The rest of this page describes the fully rolled-out model.
+</Callout>
+
+## Revenue loop
+
+Protocol revenue comes from three sources — all denominated and settled in USDC:
+
+- **Management fee:** 0.2% / year on TVL, streamed per-slot.
+- **Performance fee:** 10% of positive NAV-per-share delta vs. high-water mark.
+- **Withdrawal fee:** 0.05% on USDC-route withdrawals.
+
+A fourth revenue stream feeds from outside the protocol:
+
+- **Pump.fun trading revenue** — accumulated fees on the `$VLT` trading pair, swept weekly to the treasury.
+
+These four streams are pooled each epoch and split:
+
+```
+┌────── 100% combined revenue (vault + Pump.fun) ──────┐
+│                                                       │
+│  50% → Vault depositor rewards (xStock kind)         │
+│  50% → $VLT staker rewards (xStock kind)             │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+**Why pay in xStocks instead of `$VLT`?** Real yield. Rewards become actual equity exposure insulated from `$VLT` price volatility; `$VLT` value accrues from utility (governance, fee discounts, gated launches) rather than buyback pressure.
+
+## Epoch reward mechanics
+
+<Steps>
+
+<Step>**Epoch boundary.** Every Sunday 00:00 UTC.</Step>
+
+<Step>
+  **Sweep.** The keeper reads accumulated Pump.fun trading fees and converts to USDC via Jupiter if
+  needed.
+</Step>
+
+<Step>
+  **Pool.** Combine Pump.fun revenue with vault revenue (management + performance + withdrawal
+  fees).
+</Step>
+
+<Step>**Split.** 50% goes to the depositor pool, 50% to the staker pool.</Step>
+
+<Step>
+**Snapshot** time-weighted balances:
+
+- Vault depositors → time-weighted average share balance across the epoch.
+- `$VLT` stakers → time-weighted average staked balance (no boost multipliers).
+
+Eligibility gates:
+
+- Minimum **7-day stake age** before inclusion.
+- Time-weighting prevents "stake-right-before-snapshot" gaming.
+
+</Step>
+
+<Step>
+  **Buy baskets.** Purchase xStocks / vault shares with each pool via Jupiter (or xChange if market
+  hours).
+</Step>
+
+<Step>
+  **Publish.** Two Merkle roots posted on-chain — one for depositor claims, one for staker claims.
+</Step>
+
+<Step>
+  **Claim.** Users claim with inclusion proofs from the dapp. Unclaimed rewards roll into the next
+  epoch — never burned or forfeited.
+</Step>
+
+</Steps>
+
+## Pump.fun sweep job
+
+- Runs weekly.
+- Reads `Pump.fun` fee-wallet balance.
+- Converts to USDC via Jupiter if the fees are in other assets.
+- Deposits into the vault treasury **before** the epoch distribution runs.
+- Logs sweep amount and signature for the audit trail.
+
+## Vesting
+
+**None.** Fair-launch only. No team or investor allocations means no cliff and no unlock schedule.
+
+## Emergency levers (multisig)
+
+- Pause the weekly Pump.fun sweep or epoch distribution.
+- Update reward parameters via governance vote + 48 h timelock.
+- **Cannot** mint additional `$VLT` — supply is fixed by the Pump.fun launch.
+
+## Metrics we publish on the dapp
+
+- Circulating supply
+- Total `$VLT` staked, broken down by lockup tier
+- Last epoch's total revenue (vault + Pump.fun combined)
+- Last epoch's depositor rewards distributed (in xStocks)
+- Last epoch's staker rewards distributed (in xStocks)
+- Time-weighted staker participation (anti-gaming metric)

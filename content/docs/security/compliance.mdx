@@ -1,0 +1,55 @@
+---
+title: Compliance
+description: Who can use xVault, why users never KYC, and the exclusion policy we enforce at the edge.
+---
+
+<Callout type="warn" title="Not available to US persons">
+  xStocks are not offered to US persons or residents of jurisdictions restricted by Backed Finance.
+  The xVault dapp geofences these regions at the edge, mirroring Backed's exclusion list at
+  [assets.backed.fi/legal-documentation](https://assets.backed.fi/legal-documentation).
+</Callout>
+
+## KYC: user vs. protocol
+
+| Actor               | KYC required?                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **End users**       | **Never.** xStocks are on-chain permissionless Token-2022 tokens; depositing, withdrawing, and staking are trustless.          |
+| **Protocol entity** | Optional (v2). If the protocol onboards as a Backed client, only the **vault PDA authority** is whitelisted — never end users. |
+
+Primary-market access (issuance / redemption through Backed's market flow) requires KYC, but for xVault that pipeline targets the vault PDA. Until onboarded, xVault runs xChange-only via a company wallet that CPIs into the vault. The user-side experience does not change.
+
+## Our obligations
+
+- **Geofence** at Vercel Edge middleware (IP + geo); the block list mirrors Backed's.
+- **Terms of Service** clickwrap required before first wallet connect.
+- **No KYC** on our side — users transact exclusively in the secondary market (xChange + Jupiter).
+- **Whitelisted wallet** (if xVault onboards with Backed) is the **vault PDA**, not individual users.
+- **No fiat on/off-ramp** — USDC only. USDG and USDT may be added in v2 market-flow.
+
+## What xVault is not
+
+- Not a broker-dealer.
+- Not an investment adviser.
+- Not custodying xStocks — on-chain PDAs hold them; users can withdraw in-kind at any time.
+
+## UI disclosures
+
+- "Not available to US persons" banner on the landing and deposit pages.
+- Risk disclosure modal covering price risk, smart-contract risk, and custodian risk (Backed as the underlying issuer).
+- Live Proof-of-Reserves badge on every vault card, linking to `/public/proof-of-reserves/{symbol}`.
+
+## Blocked jurisdictions
+
+The geofence list is versioned alongside Backed's. Updates are deployed as Edge middleware changes; no user state is affected.
+
+## Reporting and transparency
+
+- Proof-of-Reserves feed surfaced per-leg on every vault card (5 min SWR).
+- Monthly treasury report covering fees collected, epoch rewards distributed, and Pump.fun sweeps.
+- All privileged ix are Squads v4 proposals with a public signer set and 48 h timelock (for parameter changes).
+
+## Data and privacy
+
+- No personal information collected.
+- Analytics via self-hosted Plausible (no cookies, no fingerprinting).
+- Wallet addresses logged server-side only for event indexing; deletion on GDPR request.

@@ -1,10 +1,23 @@
+import Image from 'next/image';
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 import { appName, docsRoute } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: appName,
+      title: (
+        <span className="flex items-center gap-2 font-semibold">
+          <Image
+            src="/brand/XVault.png"
+            alt=""
+            width={28}
+            height={28}
+            priority
+            className="h-7 w-7 rounded-md ring-1 ring-[color:var(--border)]"
+          />
+          <span className="brand-text-gradient">{appName}</span>
+        </span>
+      ),
       url: '/',
     },
     themeSwitch: {

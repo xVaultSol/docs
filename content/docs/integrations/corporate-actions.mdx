@@ -1,0 +1,65 @@
+---
+title: Corporate actions
+description: How xVault responds to each of the 13 corporate-action types exposed by the xStocks API.
+---
+
+The xStocks API surfaces upcoming corporate actions via `GET /public/corporate-actions/upcoming`. Each node carries a `caType` enum with thirteen possible values. xVault's `corp-action-watch` job polls hourly and maps each type to an action:
+
+| `caType`             | Vault response                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| `CashDividend`       | Multiplier increase — **no action**, NAV auto-adjusts.                                           |
+| `StockDividend`      | Multiplier increase — **no action**, NAV auto-adjusts.                                           |
+| `ForwardSplit`       | Multiplier change — `MultiplierMismatch` guard re-aligns automatically.                          |
+| `ReverseSplit`       | Multiplier change — same as above.                                                               |
+| `UnitSplit`          | Multiplier change — same as above.                                                               |
+| `SpinOff`            | **Pause vault.** Multisig decides whether to distribute the spin or force-exit the leg.          |
+| `CashMerger`         | **Pause vault.** Likely force-exit the leg and rebalance into the remainder.                     |
+| `StockMerger`        | **Pause vault.** May require basket reconfiguration by multisig.                                 |
+| `StockAndCashMerger` | **Pause vault.** Hybrid — requires manual reconciliation.                                        |
+| `Redemption`         | **Pause vault.** Force-exit the affected leg.                                                    |
+| `WorthlessRemoval`   | **Pause vault.** Remove the leg and redistribute weight.                                         |
+| `NameChange`         | UI-only: update the symbol label; no on-chain action.                                            |
+| `RightsDistribution` | **Pause vault.** Rights are typically handled off-chain; unclaimed rights are usually worthless. |
+
+## Why dividends need no action
+
+Backed applies cash and stock dividends as a multiplier increase on the underlying xStock. The vault's raw balance is unchanged, but its scaled balance — and therefore its NAV contribution — rises by exactly the dividend net of withholding tax.
+
+<Callout type="info" title="Use `netCashflowUsd`, not gross">
+  Dividends are paid net of withholding tax. Use `netCashflowUsd` when projecting APY from
+  historical actions — using the gross figure overstates yield.
+</Callout>
+
+## Pause semantics
+
+A paused vault:
+
+- **Blocks** `deposit`, `rebalance_leg`, `collect_mgmt_fee`, `collect_perf_fee`.
+- **Permits** `withdraw_in_kind` so users are never trapped.
+- **Permits** USDC withdrawals only if the cash buffer has enough liquidity; otherwise the withdrawal reverts with `VaultPaused` and the user is directed to the in-kind path.
+
+Unpausing is a multisig ix with no timelock (timelocks are for routine parameter changes, not emergency recovery).
+
+## Multiplier mismatch guard
+
+The vault program carries a `MultiplierMismatch` check on every balance-moving ix:
+
+```
+require!(
+  current_multiplier == expected_multiplier,
+  ErrorCode::MultiplierMismatch
+);
+```
+
+This is defense-in-depth against mid-flight multiplier updates. If the keeper has stale state while an update is applied on-chain, transfers revert cleanly rather than settle at a stale scaled amount.
+
+## Watcher job contract
+
+`corp-action-watch` runs hourly and:
+
+1. Fetches `GET /public/corporate-actions/upcoming`.
+2. For each node, resolves affected SKUs.
+3. For severe types (`SpinOff`, `*Merger`, `Redemption`, `WorthlessRemoval`, `RightsDistribution`) issues a **pause alert** to the multisig signers and, when within 48h of activation, submits `set_paused(true)` against those SKUs.
+4. Surfaces upcoming actions on the dapp banner so users see them before they deposit.
+
+See [Operations → Keeper and oracles](/docs/operations/keeper-and-oracles) for how this job interacts with the rebalancer.

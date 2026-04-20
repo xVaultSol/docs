@@ -1,33 +1,94 @@
 ---
-title: xVault documentation
-description: Protocol, operations, integrations, and on-chain references for the xVault stack.
+title: Welcome to xVault
+description: Onchain index vaults of tokenized equities on Solana, with $VLT rewards paid in real xStock kind.
 ---
 
-xVault is a Solana protocol for tokenized equity vaults built on Token-2022 xStocks, keeper-driven rebalancing, and VLT-denominated reward distribution.
+xVault is a Solana protocol that issues **auto-rebalancing index vaults** of tokenized equities (xStocks) and distributes protocol revenue to **$VLT stakers** in real equity kind rather than inflationary emissions.
 
-**Official xVault $VLT CA:** `7xChXw8fyaz8FSEm2dwXcnR1kYbQMTtYayJ9Mm4Fpump`
+Deposit USDC into a curated basket — Mag 7, Semiconductors, Dividend, SPY-Lite — and receive a single Token-2022 share that tracks the basket's NAV. A keeper rebalances to target weights through Backed's xChange during market hours and Jupiter off-hours, passing corporate actions through as rewards.
 
-The documentation in this app is organized for operators, frontend contributors, and integrators who need the protocol model without digging through implementation details first.
+<Callout type="info" title="$VLT contract address">
+  Official `$VLT` mint: `7xChXw8fyaz8FSEm2dwXcnR1kYbQMTtYayJ9Mm4Fpump` — fair-launched on Pump.fun.
+  No team, VC, or insider allocation.
+</Callout>
 
 ## Start here
 
 <Cards>
-  <Card title="Protocol overview" href="/docs/protocol/overview" />
-  <Card title="Architecture" href="/docs/protocol/architecture" />
-  <Card title="xStocks and routing" href="/docs/integrations/xstocks-and-routing" />
-  <Card title="Program IDs" href="/docs/onchain/program-ids" />
+  <Card
+    title="Quickstart"
+    href="/docs/getting-started/quickstart"
+    description="Deposit, withdraw, and stake in three flows."
+  />
+  <Card
+    title="How vaults work"
+    href="/docs/protocol/overview"
+    description="The product model, core flows, and the math rules we never break."
+  />
+  <Card
+    title="$VLT tokenomics"
+    href="/docs/tokenomics/vlt"
+    description="Supply, utility, staking tiers, and epoch rewards."
+  />
+  <Card
+    title="Security & compliance"
+    href="/docs/security/invariants"
+    description="On-chain invariants, threat model, and the US-exclusion policy."
+  />
 </Cards>
 
-## Core ideas
+## What makes xVault different
 
-- Vault holdings are valued using raw amount × multiplier × price.
-- Market-hours assets route through Backed xChange during supported windows and through Jupiter or skip paths outside those windows.
-- The keeper is responsible for NAV freshness, rebalance execution, and corporate-action response.
+<Cards>
+  <Card
+    title="Real equity rewards"
+    description="50/50 split of protocol + Pump.fun revenue is paid to depositors and $VLT stakers in xStock kind — not in the reward token."
+  />
+  <Card
+    title="Scaled-UI-native"
+    description="Every balance, transfer, and NAV computation respects Token-2022 Scaled UI. No silent rounding on splits, dividends, or fee accrual."
+  />
+  <Card
+    title="Dual-route execution"
+    description="xChange RFQ during market hours for tight spreads; Jupiter fallback off-hours and on halts. Trading-hours gating is enforced by the keeper."
+  />
+  <Card
+    title="Fair-launched $VLT"
+    description="1B supply, 100% on bonding curve, LP locked. Governance, fee discounts, and gated drops accrue to holders."
+  />
+</Cards>
+
+## How the pieces fit
+
+```
+                  ┌──────────────────────────────┐
+  User (USDC) ───▶│   Next.js dapp + SDK         │
+                  └───────────────┬──────────────┘
+                                  │
+                                  ▼
+        ┌──────────────────────────────────────────────┐
+        │    Solana programs — vault · oracle · rewards│
+        └───────────────┬──────────────────────────────┘
+                        │
+         ┌──────────────┼────────────────┐
+         ▼              ▼                ▼
+   xStocks API     Jupiter          Pyth / oracle
+   (Backed)        (fallback)       attestation
+         ▲
+         │
+    Keeper service (NAV push · drift scan · RFQ exec · epoch distribution)
+```
+
+See [Architecture](/docs/protocol/architecture) for the full component map and instruction surface.
 
 ## Documentation map
 
-- `Protocol` covers the product surface, vault lineup, and architecture.
-- `Integrations` documents xStocks data, xChange routing, and Jupiter fallback rules.
-- `Operations` focuses on keeper cadence and oracle behavior.
-- `Security` captures invariants and pause conditions.
-- `On-chain` lists the program IDs currently declared in source and their deployment status.
+| Section                                                | Audience             | Contents                                                       |
+| ------------------------------------------------------ | -------------------- | -------------------------------------------------------------- |
+| [Get started](/docs/getting-started/quickstart)        | Everyone             | Deposit / withdraw / stake walkthroughs and FAQ                |
+| [Protocol](/docs/protocol/overview)                    | Users, integrators   | Vault model, SKUs, architecture, and fee schedule              |
+| [Tokenomics](/docs/tokenomics/vlt)                     | `$VLT` holders       | Supply, utility tiers, staking lockups, epoch reward mechanics |
+| [Integrations](/docs/integrations/xstocks-and-routing) | Keepers, integrators | xStocks API usage, xChange vs. Jupiter, corporate actions      |
+| [Operations](/docs/operations/keeper-and-oracles)      | Operators            | Keeper jobs, cadence, oracle freshness, HA posture             |
+| [Reference](/docs/onchain/program-ids)                 | Developers           | Program IDs, instruction surface                               |
+| [Security](/docs/security/invariants)                  | Auditors, users      | On-chain invariants, threat model, compliance boundary         |
